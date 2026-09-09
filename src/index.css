@@ -1,0 +1,53 @@
+:root {
+  /* Uwezo / Kenya-inspired palette — not purple-AI chrome */
+  --uf-black: #111111;
+  --uf-ink: #1a1a1a;
+  --uf-gold: #c9a227;
+  --uf-gold-soft: #e8d48a;
+  --uf-green: #006b3f;
+  --uf-red: #bb0a30;
+  --uf-cream: #f7f3ea;
+  --uf-sand: #efe6d4;
+  --uf-white: #ffffff;
+  --uf-muted: #5c564c;
+  --uf-line: rgba(17, 17, 17, 0.12);
+  --uf-radius: 14px;
+  --uf-font: 'Source Sans 3', 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --uf-display: 'DM Sans', 'Source Sans 3', sans-serif;
+  color: var(--uf-ink);
+  background: var(--uf-cream);
+  font-family: var(--uf-font);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  background:
+    radial-gradient(120% 80% at 10% -10%, rgba(201, 162, 39, 0.28), transparent 55%),
+    radial-gradient(90% 60% at 100% 0%, rgba(0, 107, 63, 0.14), transparent 50%),
+    linear-gradient(180deg, var(--uf-sand) 0%, var(--uf-cream) 45%, #f3eee3 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a {
+  color: var(--uf-green);
+}
