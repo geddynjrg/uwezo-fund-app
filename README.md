@@ -23,7 +23,7 @@ Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and
 | Wezesha Majuu | https://majuu.uwezo.go.ke |
 | Loan application | https://loans.uwezo.go.ke |
 | Website | https://www.uwezo.go.ke (from portal `site-config`) |
-| Loans staging (dev / opt-in) | https://loans-staging.uwezo.go.ke |
+| Loans staging (opt-in) | Set `VITE_SHOW_LOANS_STAGING=true` + `VITE_LOANS_STAGING_URL` |
 
 ## OTP Chat — what it does
 

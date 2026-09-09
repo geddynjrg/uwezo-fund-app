@@ -7,9 +7,7 @@ type Screen = 'home' | 'chat';
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
-  const showStaging =
-    import.meta.env.VITE_SHOW_LOANS_STAGING === 'true' ||
-    import.meta.env.DEV;
+  const showStaging = import.meta.env.VITE_SHOW_LOANS_STAGING === 'true';
 
   if (screen === 'chat') {
     return <OtpChat onBack={() => setScreen('home')} />;
