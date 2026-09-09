@@ -19,6 +19,7 @@
     "@capacitor/cli": "^8.5.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/status-bar": "^8.0.3",
+    "jsqr": "^1.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "vite-plugin-pwa": "^1.3.0",
@@ -35,5 +36,5 @@
     "typescript": "~6.0.2",
     "vite": "^8.2.2"
   },
-  "description": "Uwezo Fund PWA — Majuu, loans, website links + phone OTP chat"
+  "description": "Uwezo Fund PWA — Majuu, loans, website links, phone OTP chat, App QR login"
 }

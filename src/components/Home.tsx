@@ -4,12 +4,13 @@ import { openExternal } from '../lib/openLink';
 
 type HomeProps = {
   onOpenChat: () => void;
+  onOpenQr: () => void;
   showStaging?: boolean;
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 
-export function Home({ onOpenChat, showStaging = false }: HomeProps) {
+export function Home({ onOpenChat, onOpenQr, showStaging = false }: HomeProps) {
   return (
     <main className="home">
       <header className="home-hero">
@@ -59,7 +60,13 @@ export function Home({ onOpenChat, showStaging = false }: HomeProps) {
       </section>
 
       <section className="home-chat-cta">
-        <button type="button" className="btn-primary" onClick={onOpenChat}>
+        <button type="button" className="btn-primary" onClick={onOpenQr}>
+          Scan App QR — browser login
+        </button>
+        <p className="home-chat-note">
+          Scan the website/chat QR, verify phone OTP or email, then confirm (Option B).
+        </p>
+        <button type="button" className="btn-ghost" onClick={onOpenChat}>
           OTP Chat — login with phone
         </button>
         <p className="home-chat-note">
