@@ -1,18 +1,73 @@
 # Uwezo Fund App
 
-Mobile-first **PWA** (Vite + React + TypeScript) with **Capacitor** ready for Android APK.
+Mobile-first **PWA** (Vite + React + TypeScript) with **Capacitor** Android packaging.
 Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and the official website, plus an in-app **OTP Chat** for phone login.
 
 ## Project location
 
 `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app`
 
+## Download the APK (ready to install)
+
+| File | Path |
+| --- | --- |
+| **Install this** | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/dist-apk/UwezoFund.apk` |
+| Debug alias | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/dist-apk/UwezoFund-debug.apk` |
+| Gradle output | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/android/app/build/outputs/apk/debug/app-debug.apk` |
+
+This is an **installable debug APK** (debug-signed). Size ≈ **5.3 MB**. Package id: `ke.go.uwezo.fundapp`.
+
+### Install on an Android phone (sideload)
+
+1. Copy `UwezoFund.apk` to the phone (USB, Google Drive, email, Nearby Share, or internal file share).
+2. On the phone: open the file with **Files** / **Downloads**.
+3. If prompted, allow **Install unknown apps** for that source (Chrome, Files, Drive, etc.).
+4. Tap **Install** → **Open**.
+5. Icon uses the official Uwezo Fund crest.
+
+No Play Store listing is required for this sideload build.
+
+### Rebuild the APK (this machine)
+
+Needs **JDK 21** and Android SDK (user-local installs used here):
+
+```bash
+export JAVA_HOME="$HOME/.local/jdk-21/jdk-21.0.12.1+1"
+export ANDROID_HOME="$HOME/.local/android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$JAVA_HOME/bin:$HOME/.local/node/bin:$PATH"
+
+cd /home/uwezoict/work/assistive-ai-eight/uwezo-fund-app
+npm run build
+npx cap sync android
+printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
+cd android && ./gradlew assembleDebug --no-daemon
+cd ..
+mkdir -p dist-apk
+cp -f android/app/build/outputs/apk/debug/app-debug.apk dist-apk/UwezoFund.apk
+```
+
+Or: `npm run apk:debug` (same steps via package script).
+
+### Signed release APK (optional, for production)
+
+```bash
+# Create a keystore once (keep private — do not commit)
+keytool -genkey -v -keystore uwezo-fund-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias uwezo
+
+# Configure android/keystore.properties (gitignored) then:
+cd android && ./gradlew assembleRelease
+# Output: android/app/build/outputs/apk/release/app-release.apk
+```
+
+Wire `signingConfigs` in `android/app/build.gradle` to that keystore before shipping to Play Store / wide distribution.
+
 ## Stack
 
 | Piece | Choice |
 | --- | --- |
 | UI | React 19 + TypeScript + Vite |
-| Installable | PWA (`vite-plugin-pwa`) — Add to Home Screen |
+| Installable | PWA + **debug APK** via Capacitor |
 | Native | Capacitor 8 (`appId`: `ke.go.uwezo.fundapp`) |
 | Icon | Real Uwezo Fund crest from Majuu LMS branding assets |
 
@@ -42,16 +97,16 @@ Override with `VITE_OTP_API_BASE` (e.g. `https://loans.uwezo.go.ke`).
 
 - **Wired:** Same assistive-chat login contract as Majuu portal (`phone_send` / `phone_verify`).
 - **CORS / network failure:** Chat UI stays usable; messages explain the failure and offer **Open Majuu Help** (`https://majuu.uwezo.go.ke`) so users can finish OTP in the portal Help widget.
-- Cookies/session from cross-origin browser apps may be limited by the host’s CORS/`SameSite` settings — native Capacitor WebView or same-origin hosting works best for a durable session.
-- Meta WhatsApp OTP is **not** required for this v1 (email failover on the server side remains as implemented in Majuu).
+- Native WebView (APK) is preferable to a cross-origin browser tab for session cookies.
+- Meta WhatsApp OTP is **not** required for this v1.
 
 ## Requirements
 
-- **Node.js 20+** (22 recommended). System Node 12 is too old; use a modern Node on `PATH`.
-- For Android APK: Android Studio / SDK + JDK 17+.
+- **Node.js 20+** (22 recommended).
+- **JDK 21** + Android SDK for APK builds (Capacitor 8).
 
 ```bash
-export PATH="$HOME/.local/node/bin:$PATH"   # if you installed Node under ~/.local/node
+export PATH="$HOME/.local/node/bin:$PATH"
 cd /home/uwezoict/work/assistive-ai-eight/uwezo-fund-app
 cp .env.example .env   # optional
 npm install
@@ -64,26 +119,9 @@ npm run dev
 # → http://localhost:5175
 ```
 
-Preview production build:
-
 ```bash
-npm run build
-npm run preview
+npm run build && npm run preview
 ```
-
-Install as PWA: open the preview/deployed HTTPS URL in Chrome/Safari → **Install app** / **Add to Home Screen**. Icon is the Uwezo Fund logo.
-
-## Android (Capacitor)
-
-```bash
-npm run build
-npx cap add android          # once
-npx cap sync android
-npx cap open android         # open Android Studio → Build APK/AAB
-# or: npx cap run android
-```
-
-Assets live in `public/icons/` and `src/assets/` (copied from Majuu LMS `uwezo_fund_logo.png`).
 
 ## Scripts
 
@@ -93,11 +131,12 @@ Assets live in `public/icons/` and `src/assets/` (copied from Majuu LMS `uwezo_f
 | `npm run build` | Typecheck + production build → `dist/` |
 | `npm run preview` | Serve `dist/` |
 | `npm run cap:sync` | `build` + `cap sync` |
+| `npm run apk:debug` | Build web, sync, Gradle `assembleDebug`, copy to `dist-apk/UwezoFund.apk` |
 
 ## Secrets
 
-Do **not** commit `.env` with credentials. This app only needs a public OTP API base URL — no SMS provider keys in the client.
+Do **not** commit `.env`, keystores, or SMS credentials. The client only needs a public OTP API base URL.
 
 ## Repo / commit
 
-Local project under the assistive-ai-eight workspace. Confirm with the team before creating a new GitHub repository (none named `uwezo-fund-app` existed under the usual org pattern at creation time).
+Local git on `main` under this folder. Confirm before creating/pushing a GitHub remote.
