@@ -77,12 +77,14 @@ export function parseQrLoginPayload(raw: string): QrParseResult {
 export async function confirmQrLogin(input: {
   origin: string;
   challengeId: string;
-  method: 'phone_verify' | 'password';
+  method: 'phone_verify' | 'password' | 'session';
   requestId?: string;
   otp?: string;
   username?: string;
   password?: string;
-}): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  accessToken?: string;
+  refreshToken?: string;
+}): Promise<{ ok: true; message: string } | { ok: false; error: string; needAuth?: boolean }> {
   try {
     const body: Record<string, string> = {
       challengeId: input.challengeId,
@@ -91,17 +93,25 @@ export async function confirmQrLogin(input: {
     if (input.method === 'phone_verify') {
       body.requestId = input.requestId || '';
       body.otp = input.otp || '';
-    } else {
+    } else if (input.method === 'password') {
       body.username = input.username || '';
       body.password = input.password || '';
+    } else {
+      body.accessToken = input.accessToken || '';
+      body.refreshToken = input.refreshToken || '';
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+    if (input.method === 'session' && input.accessToken) {
+      headers.Authorization = `Bearer ${input.accessToken}`;
     }
 
     const res = await fetch(`${input.origin}/api/auth/qr/confirm`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      headers,
       credentials: 'include',
       body: JSON.stringify(body),
     });
@@ -109,6 +119,7 @@ export async function confirmQrLogin(input: {
     if (!res.ok || data.ok === false) {
       return {
         ok: false,
+        needAuth: Boolean(data.needAuth),
         error: String(data.error || `Confirm failed (${res.status})`),
       };
     }

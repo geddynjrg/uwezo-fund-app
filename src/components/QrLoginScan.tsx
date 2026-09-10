@@ -4,6 +4,7 @@ import jsQR from 'jsqr';
 import logo from '../assets/uwezo-fund-logo.png';
 import { confirmQrLogin, parseQrLoginPayload, type QrLoginPayload } from '../lib/qrLogin';
 import { isLikelyKenyanMobile, normalizeKenyanPhone } from '../lib/phone';
+import { getActiveSession, type AppSession } from '../lib/session';
 import { OTP_API_BASE } from '../config';
 
 type Phase =
@@ -13,7 +14,8 @@ type Phase =
   | 'email_fallback'
   | 'otp'
   | 'password'
-  | 'done';
+  | 'done'
+  | 'confirming';
 
 type QrLoginScanProps = {
   onBack: () => void;
@@ -38,6 +40,49 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
   const [input, setInput] = useState('');
   const [emailUser, setEmailUser] = useState('');
   const [password, setPassword] = useState('');
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  }
+
+  async function confirmWithSession(
+    parsed: QrLoginPayload,
+    session: AppSession,
+  ): Promise<boolean> {
+    setPhase('confirming');
+    setBusy(true);
+    setMessage(
+      `Signed in as ${session.email}. Confirming browser login for ${parsed.origin}…`,
+    );
+    setError('');
+    try {
+      const confirmed = await confirmQrLogin({
+        origin: parsed.origin,
+        challengeId: parsed.challengeId,
+        method: 'session',
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+      });
+      if (!confirmed.ok) {
+        setError(confirmed.error);
+        setPhase('choose_verify');
+        setMessage(
+          confirmed.needAuth
+            ? 'App session could not confirm this QR. Verify with phone OTP or email/password.'
+            : `Could not auto-confirm. ${confirmed.error}`,
+        );
+        return false;
+      }
+      setPhase('done');
+      setMessage(confirmed.message);
+      return true;
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +127,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
             inversionAttempts: 'dontInvert',
           });
           if (code?.data) {
-            applyRaw(code.data);
+            void applyRaw(code.data);
             return;
           }
         }
@@ -104,17 +149,32 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
-  function applyRaw(raw: string) {
+  async function applyRaw(raw: string) {
     const parsed = parseQrLoginPayload(raw);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
     }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
+    stopCamera();
     setPayload(parsed.payload);
     setError('');
+
+    const session = getActiveSession();
+    if (session?.accessToken) {
+      const sameOrigin =
+        session.origin.replace(/\/$/, '') ===
+        parsed.payload.origin.replace(/\/$/, '');
+      if (sameOrigin) {
+        await confirmWithSession(parsed.payload, session);
+        return;
+      }
+      setPhase('choose_verify');
+      setMessage(
+        `You are signed into ${session.origin.replace(/^https:\/\//, '')}, but this QR is for ${parsed.payload.origin.replace(/^https:\/\//, '')}. Verify for this portal, or sign in to that portal first.`,
+      );
+      return;
+    }
+
     setPhase('choose_verify');
     setMessage(
       `QR accepted for ${parsed.payload.origin}. Verify with phone OTP (recommended) or email/password, then confirm.`,
@@ -124,7 +184,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
   async function onManualSubmit(e: FormEvent) {
     e.preventDefault();
     if (!manual.trim()) return;
-    applyRaw(manual.trim());
+    await applyRaw(manual.trim());
   }
 
   async function sendOtp(email?: string) {
@@ -189,7 +249,6 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
       });
       if (!confirmed.ok) {
         setError(confirmed.error);
-        // Keep email filled; only clear password for retry.
         setPassword('');
         return;
       }
@@ -253,7 +312,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
         <img src={logo} alt="" className="chat-header__logo" width={36} height={36} />
         <div className="chat-header__text">
           <strong>App QR Login</strong>
-          <span>Option B · verify then confirm</span>
+          <span>Signed-in confirm · Option B fallback</span>
         </div>
       </header>
 
@@ -318,6 +377,10 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
           </div>
         ) : null}
 
+        {phase === 'confirming' ? (
+          <div className="bubble bubble--system">Confirming with your signed-in session…</div>
+        ) : null}
+
         {phase === 'done' ? (
           <div className="chat-success">
             <p>{message}</p>
@@ -354,7 +417,11 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
               required
             />
           </label>
-          <button type="submit" className="btn-primary" disabled={busy || !emailUser.trim() || !password}>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={busy || !emailUser.trim() || !password}
+          >
             Confirm QR login
           </button>
         </form>
