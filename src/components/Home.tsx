@@ -1,16 +1,27 @@
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
+import type { AppSession } from '../lib/session';
 
 type HomeProps = {
   onOpenChat: () => void;
   onOpenQr: () => void;
+  onOpenAccount: () => void;
+  onOpenNotifications: () => void;
+  session?: AppSession | null;
   showStaging?: boolean;
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 
-export function Home({ onOpenChat, onOpenQr, showStaging = false }: HomeProps) {
+export function Home({
+  onOpenChat,
+  onOpenQr,
+  onOpenAccount,
+  onOpenNotifications,
+  session = null,
+  showStaging = false,
+}: HomeProps) {
   return (
     <main className="home">
       <header className="home-hero">
@@ -26,8 +37,15 @@ export function Home({ onOpenChat, onOpenQr, showStaging = false }: HomeProps) {
         <p className="home-tagline">Ahadi Yetu — Kazi Kwako</p>
         <p className="home-lede">
           Quick access to Wezesha Majuu, loan applications, and the official site —
-          plus phone OTP sign-in chat.
+          plus account sign-in, App QR browser login, and OTP chat.
         </p>
+        {session ? (
+          <p className="home-session">
+            Signed in as {session.email} · {session.phone}
+          </p>
+        ) : (
+          <p className="home-session home-session--muted">Not signed in</p>
+        )}
       </header>
 
       <section className="link-stack" aria-label="Main destinations">
@@ -60,11 +78,33 @@ export function Home({ onOpenChat, onOpenQr, showStaging = false }: HomeProps) {
       </section>
 
       <section className="home-chat-cta">
-        <button type="button" className="btn-primary" onClick={onOpenQr}>
+        {!session ? (
+          <>
+            <button type="button" className="btn-primary" onClick={onOpenAccount}>
+              Create account / Sign in
+            </button>
+            <p className="home-chat-note">
+              Email + verified phone, reset password, and remain signed in (Option A).
+            </p>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn-primary" onClick={onOpenNotifications}>
+              Notifications
+            </button>
+            <p className="home-chat-note">
+              OTPs and loan status updates for your signed-in account.
+            </p>
+            <button type="button" className="btn-ghost" onClick={onOpenAccount}>
+              Account settings
+            </button>
+          </>
+        )}
+        <button type="button" className="btn-ghost" onClick={onOpenQr}>
           Scan App QR — browser login
         </button>
         <p className="home-chat-note">
-          Scan the website/chat QR, verify phone OTP or email, then confirm (Option B).
+          Option B: scan website/chat QR, verify identity if needed, then confirm.
         </p>
         <button type="button" className="btn-ghost" onClick={onOpenChat}>
           OTP Chat — login with phone

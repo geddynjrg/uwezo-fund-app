@@ -390,6 +390,71 @@
   background: rgba(255, 255, 255, 0.92);
 }
 
+.home-session {
+  margin: 0.65rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--uf-green);
+}
+
+.home-session--muted {
+  color: var(--uf-muted);
+  font-weight: 500;
+}
+
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.account-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--uf-muted);
+}
+
+.account-form input,
+.account-form select {
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--uf-line);
+  border-radius: 10px;
+  font: inherit;
+  color: var(--uf-black);
+  background: #fff;
+}
+
+.account-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  font-weight: 500 !important;
+}
+
+.chat-composer-stack {
+  border-top: 1px solid var(--uf-line);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.notif {
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
+.notif--unread {
+  border-left: 3px solid var(--uf-gold);
+}
+
+.notif-meta {
+  opacity: 0.7;
+  font-size: 0.8rem;
+}
+
 @media (min-width: 720px) {
   .home {
     padding-top: 2rem;

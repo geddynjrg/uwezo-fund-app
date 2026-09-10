@@ -37,6 +37,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
   const [requestId, setRequestId] = useState('');
   const [input, setInput] = useState('');
   const [emailUser, setEmailUser] = useState('');
+  const [password, setPassword] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -136,7 +137,6 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
     setBusy(true);
     setError('');
     try {
-      // Temporarily point OTP helper base by using absolute calls via confirm origin.
       const res = await fetch(`${payload.origin}/api/assistive-chat/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -169,6 +169,37 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
     }
   }
 
+  async function submitPasswordConfirm(e: FormEvent) {
+    e.preventDefault();
+    if (!payload || busy) return;
+    const username = emailUser.trim().toLowerCase();
+    if (!username || !password) {
+      setError('Enter both email and password.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const confirmed = await confirmQrLogin({
+        origin: payload.origin,
+        challengeId: payload.challengeId,
+        method: 'password',
+        username,
+        password,
+      });
+      if (!confirmed.ok) {
+        setError(confirmed.error);
+        // Keep email filled; only clear password for retry.
+        setPassword('');
+        return;
+      }
+      setPhase('done');
+      setMessage(confirmed.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleVerifySubmit(e: FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
@@ -194,7 +225,6 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
       setBusy(true);
       setError('');
       try {
-        // Confirm directly with OTP (creates/links account server-side, Option B).
         const confirmed = await confirmQrLogin({
           origin: payload.origin,
           challengeId: payload.challengeId,
@@ -210,37 +240,6 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
         setMessage(confirmed.message);
       } finally {
         setBusy(false);
-      }
-      return;
-    }
-    if (phase === 'password') {
-      // first field collected email, second password via two-step using emailUser
-      if (!emailUser) {
-        setEmailUser(trimmed);
-        setInput('');
-        setMessage('Enter your password (masked).');
-        return;
-      }
-      setBusy(true);
-      setError('');
-      try {
-        const confirmed = await confirmQrLogin({
-          origin: payload.origin,
-          challengeId: payload.challengeId,
-          method: 'password',
-          username: emailUser,
-          password: trimmed,
-        });
-        if (!confirmed.ok) {
-          setError(confirmed.error);
-          setEmailUser('');
-          return;
-        }
-        setPhase('done');
-        setMessage(confirmed.message);
-      } finally {
-        setBusy(false);
-        setInput('');
       }
     }
   }
@@ -307,7 +306,8 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
               onClick={() => {
                 setPhase('password');
                 setEmailUser('');
-                setMessage('Enter your account email, then password.');
+                setPassword('');
+                setMessage('Enter your account email and password together, then confirm.');
               }}
             >
               Verify with email / password
@@ -330,10 +330,37 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
         ) : null}
       </div>
 
-      {phase === 'phone' ||
-      phase === 'email_fallback' ||
-      phase === 'otp' ||
-      phase === 'password' ? (
+      {phase === 'password' ? (
+        <form className="account-form chat-composer-stack" onSubmit={(e) => void submitPasswordConfirm(e)}>
+          <label>
+            Email
+            <input
+              type="email"
+              autoComplete="username"
+              value={emailUser}
+              onChange={(e) => setEmailUser(e.target.value)}
+              disabled={busy}
+              required
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={busy}
+              required
+            />
+          </label>
+          <button type="submit" className="btn-primary" disabled={busy || !emailUser.trim() || !password}>
+            Confirm QR login
+          </button>
+        </form>
+      ) : null}
+
+      {phase === 'phone' || phase === 'email_fallback' || phase === 'otp' ? (
         <form className="chat-composer" onSubmit={(e) => void handleVerifySubmit(e)}>
           <input
             value={input}
@@ -343,20 +370,16 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
                 ? '6-digit OTP'
                 : phase === 'email_fallback'
                   ? 'Email for OTP failover'
-                  : phase === 'password'
-                    ? emailUser
-                      ? 'Password'
-                      : 'Email'
-                    : 'Phone number'
+                  : 'Phone number'
             }
-            type={phase === 'password' && emailUser ? 'password' : 'text'}
+            type="text"
             inputMode={
-              phase === 'otp' ? 'numeric' : phase === 'phone' ? 'tel' : 'text'
+              phase === 'otp' ? 'numeric' : phase === 'phone' ? 'tel' : 'email'
             }
             disabled={busy}
           />
           <button type="submit" className="btn-send" disabled={busy || !input.trim()}>
-            {phase === 'otp' || (phase === 'password' && emailUser) ? 'Confirm' : 'Next'}
+            {phase === 'otp' ? 'Confirm' : 'Next'}
           </button>
         </form>
       ) : null}
