@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { AccountAuth } from './components/AccountAuth';
@@ -8,12 +8,14 @@ import { OtpChat } from './components/OtpChat';
 import { QrLoginScan } from './components/QrLoginScan';
 import {
   getActiveSession,
-  loadInbox,
-  pushInbox,
+  newId,
   type AppNotification,
   type AppSession,
 } from './lib/session';
 import { registerPushDevice, INBOX_ORIGINS, canonicalAuthOrigin } from './lib/appAuth';
+import { syncInbox } from './lib/inboxSync';
+import { ensureFreshSession } from './lib/keepSession';
+import { ensureNotifyPermission } from './lib/notify';
 import './App.css';
 
 type Screen = 'home' | 'chat' | 'qr' | 'account' | 'notifications';
@@ -22,7 +24,6 @@ function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [session, setSession] = useState<AppSession | null>(null);
   const [toast, setToast] = useState<AppNotification | null>(null);
-  const seenIds = useRef<Set<string>>(new Set());
   const showStaging = import.meta.env.VITE_SHOW_LOANS_STAGING === 'true';
 
   useEffect(() => {
@@ -31,9 +32,12 @@ function App() {
 
   useEffect(() => {
     if (!session?.accessToken) return;
+    void ensureNotifyPermission();
+    void ensureFreshSession().then((next) => {
+      if (next && next.accessToken !== session.accessToken) setSession(next);
+    });
     const deviceToken =
-      localStorage.getItem('uwezo.fund.deviceToken') ||
-      `local-${crypto.randomUUID()}`;
+      localStorage.getItem('uwezo.fund.deviceToken') || `local-${newId()}`;
     localStorage.setItem('uwezo.fund.deviceToken', deviceToken);
     const origins = Array.from(
       new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
@@ -52,83 +56,44 @@ function App() {
     }
   }, [session]);
 
-  // Poll inbox for OTP / loan notices and show floating toast + system notification.
   useEffect(() => {
     if (!session?.accessToken) return;
     let cancelled = false;
+    let inflight = false;
 
     async function poll() {
+      if (cancelled || inflight) return;
+      inflight = true;
       try {
-        const origins = Array.from(
-          new Set([canonicalAuthOrigin(session!.origin), ...INBOX_ORIGINS]),
-        );
-        for (const origin of origins) {
-          const url = new URL(`${origin}/api/auth/app/inbox`);
-          url.searchParams.set('email', session!.email);
-          url.searchParams.set('phone', session!.phone);
-          const res = await fetch(url.toString(), {
-            headers: { Accept: 'application/json' },
-            credentials: 'omit',
-          });
-          const data = (await res.json().catch(() => ({}))) as {
-            items?: Array<{
-              id: string;
-              title: string;
-              body: string;
-              kind: AppNotification['kind'];
-              createdAt: string;
-            }>;
-          };
-          if (!Array.isArray(data.items) || cancelled) continue;
-          for (const item of data.items.slice(0, 10)) {
-            if (seenIds.current.has(item.id)) continue;
-            seenIds.current.add(item.id);
-            const local = loadInbox();
-            if (!local.some((l) => l.id === item.id || l.meta?.id === item.id)) {
-              pushInbox({
-                title: item.title,
-                body: item.body,
-                kind: item.kind,
-                meta: { id: item.id },
-              });
-            }
-            if (item.kind === 'otp' || item.kind === 'loan_status') {
-              setToast({
-                id: item.id,
-                title: item.title,
-                body: item.body,
-                kind: item.kind,
-                createdAt: item.createdAt,
-                read: false,
-              });
-              if (typeof Notification !== 'undefined') {
-                if (Notification.permission === 'granted') {
-                  new Notification(item.title, { body: item.body });
-                } else if (Notification.permission !== 'denied') {
-                  void Notification.requestPermission().then((p) => {
-                    if (p === 'granted') {
-                      new Notification(item.title, { body: item.body });
-                    }
-                  });
-                }
-              }
-            }
-          }
-        }
+        const current = getActiveSession() || session;
+        if (!current) return;
+        const fresh = await syncInbox(current, { alert: true });
+        if (!cancelled && fresh[0]) setToast(fresh[0]);
       } catch {
         // ignore poll errors
+      } finally {
+        inflight = false;
       }
     }
 
     void poll();
-    const t = window.setInterval(() => void poll(), 8000);
+    const t = window.setInterval(() => void poll(), 900);
+    let resume: Promise<{ remove: () => Promise<void> | void }> | null = null;
+    if (Capacitor.isNativePlatform()) {
+      resume = CapApp.addListener('resume', () => {
+        void ensureFreshSession().then((next) => {
+          if (next) setSession(next);
+        });
+        void poll();
+      });
+    }
     return () => {
       cancelled = true;
       window.clearInterval(t);
+      void resume?.then((handle) => handle.remove());
     };
   }, [session]);
 
-  // Android hardware/gesture Back → previous screen (same as in-app ←).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
@@ -149,23 +114,25 @@ function App() {
     };
   }, [screen]);
 
+  const toastUi = toast ? (
+    <button
+      type="button"
+      className="app-toast"
+      onClick={() => {
+        setToast(null);
+        setScreen('notifications');
+      }}
+    >
+      <strong>{toast.title}</strong>
+      <span>{toast.body}</span>
+    </button>
+  ) : null;
+
   if (screen === 'chat') {
     return (
       <>
         <OtpChat onBack={() => setScreen('home')} />
-        {toast ? (
-          <button
-            type="button"
-            className="app-toast"
-            onClick={() => {
-              setToast(null);
-              setScreen('notifications');
-            }}
-          >
-            <strong>{toast.title}</strong>
-            <span>{toast.body}</span>
-          </button>
-        ) : null}
+        {toastUi}
       </>
     );
   }
@@ -173,12 +140,7 @@ function App() {
     return (
       <>
         <QrLoginScan onBack={() => setScreen('home')} />
-        {toast ? (
-          <button type="button" className="app-toast" onClick={() => setToast(null)}>
-            <strong>{toast.title}</strong>
-            <span>{toast.body}</span>
-          </button>
-        ) : null}
+        {toastUi}
       </>
     );
   }
@@ -204,19 +166,7 @@ function App() {
         session={session}
         showStaging={showStaging}
       />
-      {toast ? (
-        <button
-          type="button"
-          className="app-toast"
-          onClick={() => {
-            setToast(null);
-            setScreen('notifications');
-          }}
-        >
-          <strong>{toast.title}</strong>
-          <span>{toast.body}</span>
-        </button>
-      ) : null}
+      {toastUi}
     </>
   );
 }

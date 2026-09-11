@@ -84,7 +84,10 @@ export async function confirmQrLogin(input: {
   password?: string;
   accessToken?: string;
   refreshToken?: string;
-}): Promise<{ ok: true; message: string } | { ok: false; error: string; needAuth?: boolean }> {
+}): Promise<
+  | { ok: true; message: string; accessToken?: string; refreshToken?: string }
+  | { ok: false; error: string; needAuth?: boolean }
+> {
   try {
     const body: Record<string, string> = {
       challengeId: input.challengeId,
@@ -112,7 +115,7 @@ export async function confirmQrLogin(input: {
     const res = await fetch(`${input.origin}/api/auth/qr/confirm`, {
       method: 'POST',
       headers,
-      credentials: 'include',
+      credentials: 'omit',
       body: JSON.stringify(body),
     });
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -129,6 +132,12 @@ export async function confirmQrLogin(input: {
         data.message ||
           'Confirmed. Return to the browser to finish signing in.',
       ),
+      accessToken: data.accessToken || data.access_token
+        ? String(data.accessToken || data.access_token)
+        : undefined,
+      refreshToken: data.refreshToken || data.refresh_token
+        ? String(data.refreshToken || data.refresh_token)
+        : undefined,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

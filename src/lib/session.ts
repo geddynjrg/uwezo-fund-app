@@ -1,5 +1,6 @@
 const SESSION_KEY = 'uwezo.fund.app.session.v1';
 const INBOX_KEY = 'uwezo.fund.app.inbox.v1';
+const SEEN_KEY = 'uwezo.fund.app.seenNotices.v1';
 
 export type AppSession = {
   email: string;
@@ -20,6 +21,30 @@ export type AppNotification = {
   read: boolean;
   meta?: Record<string, string>;
 };
+
+export function noticeFingerprint(item: {
+  id?: string;
+  title: string;
+  body: string;
+  kind: string;
+}) {
+  return `${item.kind}|${item.title}|${item.body}`.slice(0, 400);
+}
+
+export function loadSeenNoticeKeys(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    const list = raw ? (JSON.parse(raw) as string[]) : [];
+    return new Set(Array.isArray(list) ? list.slice(0, 400) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function rememberSeenNoticeKeys(keys: Iterable<string>) {
+  const next = [...new Set([...loadSeenNoticeKeys(), ...keys])].slice(-400);
+  localStorage.setItem(SEEN_KEY, JSON.stringify(next));
+}
 
 export function loadSession(): AppSession | null {
   try {
@@ -79,6 +104,18 @@ function canonicalizeSession(session: AppSession): AppSession {
   return session;
 }
 
+export function accessTokenExpiryMs(token: string): number | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/');
+    const json = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof json.exp === 'number' ? json.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadInbox(): AppNotification[] {
   try {
     const raw = localStorage.getItem(INBOX_KEY);
@@ -90,16 +127,48 @@ export function loadInbox(): AppNotification[] {
   }
 }
 
-export function pushInbox(item: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) {
-  const next: AppNotification = {
-    ...item,
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
+export function newId() {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // older Android WebViews
+  }
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function upsertInbox(
+  item: Omit<AppNotification, 'id' | 'createdAt' | 'read'> & {
+    id?: string;
+    createdAt?: string;
+  },
+): { notice: AppNotification; created: boolean } {
+  const list = loadInbox();
+  const fingerprint = noticeFingerprint(item);
+  const existing = list.find(
+    (row) =>
+      (item.id && (row.id === item.id || row.meta?.id === item.id)) ||
+      noticeFingerprint(row) === fingerprint,
+  );
+  if (existing) {
+    return { notice: existing, created: false };
+  }
+  const notice: AppNotification = {
+    id: item.id || newId(),
+    title: item.title,
+    body: item.body,
+    kind: item.kind,
+    createdAt: item.createdAt || new Date().toISOString(),
     read: false,
+    meta: { ...item.meta, ...(item.id ? { id: item.id } : {}) },
   };
-  const list = [next, ...loadInbox()].slice(0, 100);
-  localStorage.setItem(INBOX_KEY, JSON.stringify(list));
-  return next;
+  localStorage.setItem(INBOX_KEY, JSON.stringify([notice, ...list].slice(0, 100)));
+  return { notice, created: true };
+}
+
+export function pushInbox(item: Omit<AppNotification, 'id' | 'createdAt' | 'read'>) {
+  return upsertInbox(item).notice;
 }
 
 export function markInboxRead(id?: string) {

@@ -4,8 +4,9 @@ import jsQR from 'jsqr';
 import logo from '../assets/uwezo-fund-logo.png';
 import { confirmQrLogin, parseQrLoginPayload, type QrLoginPayload } from '../lib/qrLogin';
 import { isLikelyKenyanMobile, normalizeKenyanPhone } from '../lib/phone';
-import { getActiveSession, type AppSession } from '../lib/session';
+import { getActiveSession, saveSession, type AppSession } from '../lib/session';
 import { OTP_API_BASE } from '../config';
+import { ensureFreshSession } from '../lib/keepSession';
 
 type Phase =
   | 'scan'
@@ -59,22 +60,29 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
     );
     setError('');
     try {
+      const fresh = (await ensureFreshSession()) || session;
       const confirmed = await confirmQrLogin({
         origin: parsed.origin,
         challengeId: parsed.challengeId,
         method: 'session',
-        accessToken: session.accessToken,
-        refreshToken: session.refreshToken,
+        accessToken: fresh.accessToken,
+        refreshToken: fresh.refreshToken,
       });
       if (!confirmed.ok) {
         setError(confirmed.error);
         setPhase('choose_verify');
         setMessage(
-          confirmed.needAuth
-            ? 'App session could not confirm this QR. Verify with phone OTP or email/password.'
-            : `Could not auto-confirm. ${confirmed.error}`,
+          'You are still signed in on this phone. Verify this QR with OTP or email/password if it is for a different portal — do not sign out.',
         );
         return false;
+      }
+      if (confirmed.accessToken) {
+        saveSession({
+          ...fresh,
+          accessToken: confirmed.accessToken,
+          refreshToken: confirmed.refreshToken || fresh.refreshToken,
+          verifiedAt: new Date().toISOString(),
+        });
       }
       setPhase('done');
       setMessage(confirmed.message);
@@ -161,17 +169,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
 
     const session = getActiveSession();
     if (session?.accessToken) {
-      const sameOrigin =
-        session.origin.replace(/\/$/, '') ===
-        parsed.payload.origin.replace(/\/$/, '');
-      if (sameOrigin) {
-        await confirmWithSession(parsed.payload, session);
-        return;
-      }
-      setPhase('choose_verify');
-      setMessage(
-        `You are signed into ${session.origin.replace(/^https:\/\//, '')}, but this QR is for ${parsed.payload.origin.replace(/^https:\/\//, '')}. Verify for this portal, or sign in to that portal first.`,
-      );
+      await confirmWithSession(parsed.payload, session);
       return;
     }
 

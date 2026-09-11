@@ -1,76 +1,24 @@
 import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
-import { canonicalAuthOrigin, INBOX_ORIGINS } from '../lib/appAuth';
-import { getActiveSession, loadInbox, markInboxRead, pushInbox, type AppNotification } from '../lib/session';
+import { INBOX_UPDATED_EVENT } from '../lib/inboxSync';
+import { getActiveSession, loadInbox, markInboxRead, type AppNotification } from '../lib/session';
 
 type NotificationsProps = {
   onBack: () => void;
 };
 
 export function Notifications({ onBack }: NotificationsProps) {
-  const [items, setItems] = useState<AppNotification[]>([]);
-  const [message, setMessage] = useState('Pulling OTP and loan status notices…');
+  const [items, setItems] = useState<AppNotification[]>(() => loadInbox());
+  const [message, setMessage] = useState('OTP and loan alerts also appear as phone notifications.');
 
   useEffect(() => {
-    let cancelled = false;
-    async function refresh() {
-      const local = loadInbox();
-      const session = getActiveSession();
-      if (!session) {
-        if (!cancelled) {
-          setItems(local);
-          setMessage('Sign in to sync OTP/loan notifications from the server.');
-        }
-        return;
-      }
-      try {
-        const origins = Array.from(
-          new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
-        );
-        for (const origin of origins) {
-          const url = new URL(`${origin}/api/auth/app/inbox`);
-          url.searchParams.set('email', session.email);
-          url.searchParams.set('phone', session.phone);
-          const res = await fetch(url.toString(), {
-            headers: { Accept: 'application/json' },
-            credentials: 'omit',
-          });
-          const data = (await res.json().catch(() => ({}))) as {
-            items?: Array<{
-              id: string;
-              title: string;
-              body: string;
-              kind: AppNotification['kind'];
-              createdAt: string;
-            }>;
-          };
-          if (Array.isArray(data.items)) {
-            for (const item of data.items.slice(0, 20)) {
-              if (!local.some((l) => l.id === item.id)) {
-                pushInbox({
-                  title: item.title,
-                  body: item.body,
-                  kind: item.kind,
-                  meta: { id: item.id },
-                });
-              }
-            }
-          }
-        }
-      } catch {
-        // keep local inbox
-      }
-      if (!cancelled) {
-        setItems(loadInbox());
-        setMessage('Showing in-app notifications (OTP + loan status). FCM optional.');
-      }
+    const refreshLocal = () => setItems(loadInbox());
+    window.addEventListener(INBOX_UPDATED_EVENT, refreshLocal);
+    refreshLocal();
+    if (!getActiveSession()) {
+      setMessage('Sign in to receive OTP and loan alerts on this phone.');
     }
-    void refresh();
-    const t = window.setInterval(() => void refresh(), 15000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(t);
-    };
+    return () => window.removeEventListener(INBOX_UPDATED_EVENT, refreshLocal);
   }, []);
 
   return (

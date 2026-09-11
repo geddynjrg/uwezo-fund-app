@@ -23,8 +23,44 @@ export function canonicalAuthOrigin(origin: string): AuthOrigin {
   return 'https://loans.uwezo.go.ke';
 }
 
-async function postJson(origin: string, path: string, body: Record<string, unknown>) {
+const ORIGIN_STORAGE_KEY = 'uwezo.fund.app.authOrigin.v1';
+
+export function rememberAuthOrigin(origin: AuthOrigin) {
+  try {
+    localStorage.setItem(ORIGIN_STORAGE_KEY, canonicalAuthOrigin(origin));
+  } catch {
+    // ignore
+  }
+}
+
+export function lastAuthOrigin(): AuthOrigin | null {
+  try {
+    const raw = localStorage.getItem(ORIGIN_STORAGE_KEY) || '';
+    if (!raw) return null;
+    return canonicalAuthOrigin(raw);
+  } catch {
+    return null;
+  }
+}
+
+function portalHost(origin: string) {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin.replace(/^https?:\/\//, '');
+  }
+}
+
+async function postJson(
+  origin: string,
+  path: string,
+  body: Record<string, unknown>,
+  timeoutMs = 20000,
+) {
   const url = `${origin.replace(/\/$/, '')}${path}`;
+  const host = portalHost(origin);
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -34,12 +70,20 @@ async function postJson(origin: string, path: string, body: Record<string, unkno
         Accept: 'application/json',
       },
       credentials: 'omit',
+      signal: ctrl.signal,
       body: JSON.stringify(body),
     });
-  } catch {
+  } catch (err) {
+    const aborted =
+      (err instanceof DOMException && err.name === 'AbortError') ||
+      (err instanceof Error && err.name === 'AbortError');
     throw new Error(
-      'Could not reach the portal. Check your connection and try Loans sign-in again.',
+      aborted
+        ? `Sign-in timed out on ${host}. Wezesha Majuu and Loans are separate accounts — pick the portal you registered on.`
+        : `Could not reach ${host}. Check your connection, then try again.`,
     );
+  } finally {
+    window.clearTimeout(timer);
   }
   const text = await res.text();
   let data: Record<string, unknown> = {};
@@ -48,12 +92,13 @@ async function postJson(origin: string, path: string, body: Record<string, unkno
   } catch {
     throw new Error(
       res.ok
-        ? 'Unexpected response from the portal.'
-        : `Sign-in is not available on this portal (${res.status}). Try Loans.`,
+        ? `Unexpected response from ${host}.`
+        : `Sign-in is not available on ${host} (${res.status}).`,
     );
   }
   if (!res.ok || data.ok === false) {
-    throw new Error(String(data.error || data.message || `Request failed (${res.status})`));
+    const detail = String(data.error || data.message || `Request failed (${res.status})`);
+    throw new Error(`${detail} (${host})`);
   }
   return data;
 }
@@ -120,7 +165,57 @@ export async function registerPushDevice(input: {
   });
 }
 
+export async function refreshAppSession(input: {
+  origin: string;
+  refreshToken: string;
+}) {
+  return postJson(
+    input.origin,
+    '/api/auth/app/account',
+    {
+      action: 'refresh',
+      refreshToken: input.refreshToken,
+    },
+    8000,
+  );
+}
+
+export async function fetchInbox(input: {
+  origin: string;
+  email?: string;
+  phone?: string;
+  timeoutMs?: number;
+}) {
+  const origin = input.origin.replace(/\/$/, '');
+  const url = new URL(`${origin}/api/auth/app/inbox`);
+  if (input.email) url.searchParams.set('email', input.email);
+  if (input.phone) url.searchParams.set('phone', input.phone);
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), input.timeoutMs ?? 800);
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { Accept: 'application/json' },
+      credentials: 'omit',
+      signal: ctrl.signal,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      items?: Array<{
+        id: string;
+        title: string;
+        body: string;
+        kind: 'otp' | 'loan_status' | 'system';
+        createdAt: string;
+      }>;
+    };
+    return Array.isArray(data.items) ? data.items : [];
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export function defaultAuthOrigin(): AuthOrigin {
+  const remembered = lastAuthOrigin();
+  if (remembered) return remembered;
   const base = OTP_API_BASE.replace(/\/$/, '').toLowerCase();
   if (base.includes('majuu')) return 'https://majuu.uwezo.go.ke';
   return 'https://loans.uwezo.go.ke';

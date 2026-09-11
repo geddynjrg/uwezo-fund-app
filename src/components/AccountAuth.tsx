@@ -8,6 +8,7 @@ import {
   appSignup,
   canonicalAuthOrigin,
   defaultAuthOrigin,
+  rememberAuthOrigin,
   type AuthOrigin,
 } from '../lib/appAuth';
 import { isLikelyKenyanMobile, normalizeKenyanPhone } from '../lib/phone';
@@ -90,19 +91,33 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
 
   async function onLogin(e: FormEvent) {
     e.preventDefault();
+    const emailNorm = email.trim().toLowerCase();
+    const phoneNorm = normalizeKenyanPhone(phone.trim());
+    if (!emailNorm) {
+      setError('Enter the email for this portal account.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (!isLikelyKenyanMobile(phoneNorm)) {
+      setError('Enter a valid Kenyan mobile number such as 07XXXXXXXX.');
+      return;
+    }
     setBusy(true);
     setError('');
+    rememberAuthOrigin(canonicalAuthOrigin(origin));
     try {
-      const phoneNorm = normalizeKenyanPhone(phone);
       const data = await appLoginOrRegister({
         origin: canonicalAuthOrigin(origin),
-        email,
+        email: emailNorm,
         password,
         phone: phoneNorm,
         createIfMissing: true,
       });
       const next: AppSession = {
-        email: email.trim().toLowerCase(),
+        email: emailNorm,
         phone: phoneNorm,
         accessToken: String(data.accessToken || data.access_token || ''),
         refreshToken: String(data.refreshToken || data.refresh_token || '') || undefined,
@@ -247,6 +262,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
         {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
           <form
             className="account-form"
+            noValidate
             onSubmit={(e) => {
               if (mode === 'login') void onLogin(e);
               else if (mode === 'signup') void onSignup(e);
@@ -257,7 +273,11 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
               Portal
               <select
                 value={origin}
-                onChange={(e) => setOrigin(e.target.value as AuthOrigin)}
+                onChange={(e) => {
+                  const next = e.target.value as AuthOrigin;
+                  setOrigin(next);
+                  rememberAuthOrigin(next);
+                }}
                 disabled={busy}
               >
                 {AUTH_ORIGINS.map((o) => (
@@ -267,6 +287,11 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
                 ))}
               </select>
             </label>
+            <p className="home-chat-note">
+              Signing in to {AUTH_ORIGINS.find((o) => o.id === origin)?.label} (
+              {origin.replace(/^https:\/\//, '')}). Wezesha Majuu and Loans are separate
+              accounts.
+            </p>
             <label>
               Email
               <input
