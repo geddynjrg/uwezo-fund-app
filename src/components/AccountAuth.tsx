@@ -6,6 +6,7 @@ import {
   appLoginOrRegister,
   appResetPassword,
   appSignup,
+  canonicalAuthOrigin,
   defaultAuthOrigin,
   type AuthOrigin,
 } from '../lib/appAuth';
@@ -58,10 +59,10 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch(`${origin}/api/assistive-chat/login`, {
+      const res = await fetch(`${canonicalAuthOrigin(origin)}/api/assistive-chat/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        credentials: 'include',
+        credentials: 'omit',
         body: JSON.stringify({
           method: 'phone_send',
           phone: phoneNorm,
@@ -74,7 +75,12 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
       }
       setPhone(phoneNorm);
       setRequestId(String(data.requestId || ''));
-      setMessage(String(data.message || 'OTP sent. Enter the 6-digit code.'));
+      setMessage(
+        String(
+          data.message ||
+            'OTP sent by SMS and to the Uwezo Fund app if you stayed signed in. Enter the 6-digit code.',
+        ),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'OTP send failed');
     } finally {
@@ -89,7 +95,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     try {
       const phoneNorm = normalizeKenyanPhone(phone);
       const data = await appLoginOrRegister({
-        origin,
+        origin: canonicalAuthOrigin(origin),
         email,
         password,
         phone: phoneNorm,
@@ -100,7 +106,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
         phone: phoneNorm,
         accessToken: String(data.accessToken || data.access_token || ''),
         refreshToken: String(data.refreshToken || data.refresh_token || '') || undefined,
-        origin,
+        origin: canonicalAuthOrigin(origin),
         remainSignedIn,
         verifiedAt: new Date().toISOString(),
       };
@@ -128,7 +134,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     }
     const code = otp.replace(/\D/g, '');
     if (code.length !== 6) {
-      setError('Enter the 6-digit OTP from SMS/email.');
+      setError('Enter the 6-digit OTP from SMS, email, or the Uwezo Fund app.');
       return;
     }
     setBusy(true);
@@ -136,7 +142,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     try {
       const phoneNorm = normalizeKenyanPhone(phone);
       const data = await appSignup({
-        origin,
+        origin: canonicalAuthOrigin(origin),
         email,
         password,
         phone: phoneNorm,
@@ -148,7 +154,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
         phone: phoneNorm,
         accessToken: String(data.accessToken || data.access_token || ''),
         refreshToken: String(data.refreshToken || data.refresh_token || '') || undefined,
-        origin,
+        origin: canonicalAuthOrigin(origin),
         remainSignedIn,
         verifiedAt: new Date().toISOString(),
       };

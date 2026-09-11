@@ -35,7 +35,7 @@ export const LINKS = {
  */
 export const OTP_API_BASE =
   (import.meta.env.VITE_OTP_API_BASE as string | undefined)?.replace(/\/$/, '') ||
-  'https://majuu.uwezo.go.ke';
+  'https://loans.uwezo.go.ke';
 
 export const OTP_LOGIN_PATH = '/api/assistive-chat/login';
 

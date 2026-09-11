@@ -52,12 +52,31 @@ export function getActiveSession(): AppSession | null {
     const fromSession = sessionStorage.getItem(SESSION_KEY);
     if (fromSession) {
       const parsed = JSON.parse(fromSession) as AppSession;
-      if (parsed?.accessToken) return parsed;
+      if (parsed?.accessToken) return canonicalizeSession(parsed);
     }
   } catch {
     // ignore
   }
-  return loadSession();
+  const stored = loadSession();
+  return stored ? canonicalizeSession(stored) : null;
+}
+
+function canonicalizeSession(session: AppSession): AppSession {
+  const origin = session.origin.replace(/\/$/, '');
+  if (origin.includes('loans-staging') || origin.includes('loans.uwezo.go.ke')) {
+    if (origin !== 'https://loans.uwezo.go.ke') {
+      const next = { ...session, origin: 'https://loans.uwezo.go.ke' };
+      if (session.remainSignedIn) {
+        try {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+      }
+      return next;
+    }
+  }
+  return session;
 }
 
 export function loadInbox(): AppNotification[] {

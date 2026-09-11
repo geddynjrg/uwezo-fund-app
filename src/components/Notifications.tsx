@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
+import { canonicalAuthOrigin, INBOX_ORIGINS } from '../lib/appAuth';
 import { getActiveSession, loadInbox, markInboxRead, pushInbox, type AppNotification } from '../lib/session';
 
 type NotificationsProps = {
@@ -23,30 +24,36 @@ export function Notifications({ onBack }: NotificationsProps) {
         return;
       }
       try {
-        const url = new URL(`${session.origin}/api/auth/app/inbox`);
-        url.searchParams.set('email', session.email);
-        url.searchParams.set('phone', session.phone);
-        const res = await fetch(url.toString(), {
-          headers: { Accept: 'application/json' },
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          items?: Array<{
-            id: string;
-            title: string;
-            body: string;
-            kind: AppNotification['kind'];
-            createdAt: string;
-          }>;
-        };
-        if (Array.isArray(data.items)) {
-          for (const item of data.items.slice(0, 20)) {
-            if (!local.some((l) => l.id === item.id)) {
-              pushInbox({
-                title: item.title,
-                body: item.body,
-                kind: item.kind,
-                meta: { id: item.id },
-              });
+        const origins = Array.from(
+          new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
+        );
+        for (const origin of origins) {
+          const url = new URL(`${origin}/api/auth/app/inbox`);
+          url.searchParams.set('email', session.email);
+          url.searchParams.set('phone', session.phone);
+          const res = await fetch(url.toString(), {
+            headers: { Accept: 'application/json' },
+            credentials: 'omit',
+          });
+          const data = (await res.json().catch(() => ({}))) as {
+            items?: Array<{
+              id: string;
+              title: string;
+              body: string;
+              kind: AppNotification['kind'];
+              createdAt: string;
+            }>;
+          };
+          if (Array.isArray(data.items)) {
+            for (const item of data.items.slice(0, 20)) {
+              if (!local.some((l) => l.id === item.id)) {
+                pushInbox({
+                  title: item.title,
+                  body: item.body,
+                  kind: item.kind,
+                  meta: { id: item.id },
+                });
+              }
             }
           }
         }
