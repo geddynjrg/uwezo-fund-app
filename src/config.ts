@@ -19,7 +19,7 @@ export const LINKS = {
     // Override with VITE_LOANS_STAGING_URL if your staging host differs
     url:
       (import.meta.env.VITE_LOANS_STAGING_URL as string | undefined)?.trim() ||
-      'https://loans.uwezo.go.ke',
+      'https://loans-staging.uwezo.go.ke',
   },
   website: {
     id: 'website',

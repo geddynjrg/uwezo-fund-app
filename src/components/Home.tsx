@@ -17,6 +17,16 @@ type HomeProps = {
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
+const APP_VERSION = '1.1.3';
+
+function friendlyUpdateMessage(raw: string) {
+  const text = String(raw || '').trim();
+  if (!text) return 'Could not update the app.';
+  if (/https?:\/\/|github|raw\.githubusercontent/i.test(text)) {
+    return 'The update could not be installed. You already have this version, or the update file is not available yet.';
+  }
+  return text;
+}
 
 export function Home({
   onOpenQr,
@@ -44,7 +54,7 @@ export function Home({
       if (!result.updateAvailable) {
         setUpdateNote(
           fromUser
-            ? `You already have the latest version (${result.versionName || '1.1.2'}).`
+            ? `You already have the latest version (${result.versionName || APP_VERSION}).`
             : '',
         );
         return;
@@ -55,9 +65,17 @@ export function Home({
         );
         return;
       }
-      setUpdateNote('No installer started. Try Check for app update again.');
+      setUpdateNote(
+        fromUser
+          ? 'No update could be installed. You already have this version, or the installer could not start.'
+          : '',
+      );
     } catch (err) {
-      setUpdateNote(err instanceof Error ? err.message : 'Could not update the app.');
+      setUpdateNote(
+        fromUser
+          ? friendlyUpdateMessage(err instanceof Error ? err.message : '')
+          : '',
+      );
     } finally {
       setUpdateBusy(false);
     }
@@ -66,7 +84,7 @@ export function Home({
   useEffect(() => {
     let remove: (() => Promise<void>) | undefined;
     void onUpdateProgress((event) => {
-      if (event.message) setUpdateNote(event.message);
+      if (event.message) setUpdateNote(friendlyUpdateMessage(event.message));
     }).then((handle) => {
       remove = () => handle.remove();
     });
@@ -177,7 +195,7 @@ export function Home({
 
       <footer className="home-footer">
         <p>Republic of Kenya · Uwezo Fund</p>
-        <p>App 1.1.2 · updates download and install over this app</p>
+        <p>App {APP_VERSION} · updates download and install over this app</p>
       </footer>
     </main>
   );

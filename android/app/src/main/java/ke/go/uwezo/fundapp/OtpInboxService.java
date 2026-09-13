@@ -199,10 +199,6 @@ public class OtpInboxService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | immutable());
 
     String displayBody = body;
-    if ("otp".equals(kind) && !TextUtils.isEmpty(otp)) {
-      displayBody = body + "\nTap Copy OTP, then paste where you were asked for the code.";
-    }
-
     NotificationCompat.Builder builder =
         new NotificationCompat.Builder(this, CHANNEL_ALERT)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -214,27 +210,33 @@ public class OtpInboxService extends Service {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setAutoCancel(false)
             .setContentIntent(content)
-            .setColor(0xFF006B3F)
-            .addAction(android.R.drawable.ic_menu_save, "Copy OTP", copyPi);
+            .setColor(0xFF006B3F);
+
+    if ("otp".equals(kind) && !TextUtils.isEmpty(otp)) {
+      displayBody = otp + " — tap Copy OTP, then paste where you were asked for the code.";
+      builder
+          .setContentText(displayBody)
+          .setStyle(new NotificationCompat.BigTextStyle().bigText(displayBody))
+          .addAction(android.R.drawable.ic_menu_save, "Copy OTP", copyPi);
+    }
 
     NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
     if (nm != null) nm.notify(req == 0 ? 71011 : req, builder.build());
   }
 
   private Notification listenerNotification() {
-    Intent open = new Intent(this, MainActivity.class);
-    open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-    PendingIntent content =
-        PendingIntent.getActivity(
-            this, 3, open, PendingIntent.FLAG_UPDATE_CURRENT | immutable());
+    // Android requires a foreground-service notification, but keep it silent
+    // and out of the shade as far as the OS allows.
     return new NotificationCompat.Builder(this, CHANNEL_LISTENER)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("Uwezo Fund")
-        .setContentText("Listening for OTP and loan alerts")
+        .setContentText("")
+        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setSilent(true)
         .setOngoing(true)
-        .setOnlyAlertOnce(true)
-        .setContentIntent(content)
-        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        .setShowWhen(false)
+        .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
         .build();
   }
 
@@ -242,11 +244,16 @@ public class OtpInboxService extends Service {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
     NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
     if (nm == null) return;
+    nm.deleteNotificationChannel(CHANNEL_LISTENER);
     NotificationChannel listen =
         new NotificationChannel(
-            CHANNEL_LISTENER, "OTP listener", NotificationManager.IMPORTANCE_LOW);
-    listen.setDescription("Keeps listening for login codes while the app is closed");
+            CHANNEL_LISTENER, "Background sync", NotificationManager.IMPORTANCE_NONE);
+    listen.setDescription("Silent background sync");
     listen.setShowBadge(false);
+    listen.setSound(null, null);
+    listen.enableVibration(false);
+    listen.enableLights(false);
+    listen.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
     NotificationChannel alert =
         new NotificationChannel(
             CHANNEL_ALERT, "OTP codes", NotificationManager.IMPORTANCE_HIGH);

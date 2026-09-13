@@ -62,6 +62,7 @@ final class OtpPrefs {
     }
     if (out.isEmpty()) {
       out.add("https://loans.uwezo.go.ke");
+      out.add("https://loans-staging.uwezo.go.ke");
       out.add("https://majuu.uwezo.go.ke");
     }
     return out;

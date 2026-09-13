@@ -1,6 +1,9 @@
 import { OTP_API_BASE, LINKS } from '../config';
 
-export type AuthOrigin = 'https://majuu.uwezo.go.ke' | 'https://loans.uwezo.go.ke';
+export type AuthOrigin =
+  | 'https://majuu.uwezo.go.ke'
+  | 'https://loans.uwezo.go.ke'
+  | 'https://loans-staging.uwezo.go.ke';
 
 export const AUTH_ORIGINS: { id: AuthOrigin; label: string }[] = [
   { id: LINKS.loans.url as AuthOrigin, label: 'Loans' },
@@ -10,6 +13,7 @@ export const AUTH_ORIGINS: { id: AuthOrigin; label: string }[] = [
 /** Portals that should receive device registration and OTP inbox polls. */
 export const INBOX_ORIGINS: AuthOrigin[] = [
   'https://loans.uwezo.go.ke',
+  'https://loans-staging.uwezo.go.ke',
   'https://majuu.uwezo.go.ke',
 ];
 
@@ -20,6 +24,9 @@ function normalizeEmail(email: string) {
 export function canonicalAuthOrigin(origin: string): AuthOrigin {
   const host = origin.replace(/\/$/, '').toLowerCase();
   if (host.includes('majuu')) return 'https://majuu.uwezo.go.ke';
+  if (host.includes('loans-staging') || host.includes('staging')) {
+    return 'https://loans-staging.uwezo.go.ke';
+  }
   return 'https://loans.uwezo.go.ke';
 }
 
@@ -218,5 +225,6 @@ export function defaultAuthOrigin(): AuthOrigin {
   if (remembered) return remembered;
   const base = OTP_API_BASE.replace(/\/$/, '').toLowerCase();
   if (base.includes('majuu')) return 'https://majuu.uwezo.go.ke';
+  if (base.includes('staging')) return 'https://loans-staging.uwezo.go.ke';
   return 'https://loans.uwezo.go.ke';
 }

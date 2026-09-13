@@ -85,11 +85,11 @@ public class UwezoNativePlugin extends Plugin {
                 ret.put("versionCode", m.versionCode);
                 ret.put("versionName", m.versionName);
                 ret.put("notes", m.notes);
-                ret.put("apkUrl", m.apkUrl);
+                ret.put("apkUrl", "");
                 ret.put("currentVersionCode", BuildConfig.VERSION_CODE);
                 call.resolve(ret);
               } catch (Exception e) {
-                call.reject("Could not check for updates: " + e.getMessage());
+                call.reject("Could not check for updates. Try again when you have a connection.");
               }
             })
         .start();
@@ -103,6 +103,9 @@ public class UwezoNativePlugin extends Plugin {
                 notifyStage("checking", "Checking for an update…");
                 AppUpdateHelper.Manifest m = AppUpdateHelper.fetchManifest();
                 if (m.versionCode <= BuildConfig.VERSION_CODE) {
+                  notifyStage(
+                      "up_to_date",
+                      "You already have the latest version (" + BuildConfig.VERSION_NAME + ").");
                   JSObject ret = new JSObject();
                   ret.put("started", false);
                   ret.put("updateAvailable", false);
@@ -138,7 +141,8 @@ public class UwezoNativePlugin extends Plugin {
                 ret.put("stage", "installing");
                 call.resolve(ret);
               } catch (Exception e) {
-                call.reject("Could not install update: " + e.getMessage());
+                call.reject(
+                    "The update could not be installed. You already have this version, or the update file is not available yet.");
               }
             })
         .start();
