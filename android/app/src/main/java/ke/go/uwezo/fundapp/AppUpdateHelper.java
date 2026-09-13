@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
 
 final class AppUpdateHelper {
   static final String MANIFEST_URL =
-      "https://raw.githubusercontent.com/geddynjrg/uwezo-fund-app/main/dist-apk/version.json";
+      "https://loans.uwezo.go.ke/uwezo-app/version.json";
 
   static class Manifest {
     int versionCode;

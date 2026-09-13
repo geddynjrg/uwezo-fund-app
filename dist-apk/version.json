@@ -1,6 +1,6 @@
 {
   "versionCode": 5,
   "versionName": "1.1.3",
-  "apkUrl": "https://raw.githubusercontent.com/geddynjrg/uwezo-fund-app/main/dist-apk/UwezoFund.apk",
+  "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
   "notes": "Silent OTP listener, copyable OTP alerts, and a status message when no update is available."
 }
