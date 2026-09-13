@@ -68,17 +68,22 @@ final class AppUpdateHelper {
     return out;
   }
 
+  static boolean canInstall(Context context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+    return context.getPackageManager().canRequestPackageInstalls();
+  }
+
+  static void requestInstallPermission(Context context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+    Intent settings =
+        new Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:" + context.getPackageName()));
+    settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    context.startActivity(settings);
+  }
+
   static void promptInstall(Context context, File apk) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      if (!context.getPackageManager().canRequestPackageInstalls()) {
-        Intent settings =
-            new Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:" + context.getPackageName()));
-        settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        context.startActivity(settings);
-      }
-    }
     Uri uri =
         FileProvider.getUriForFile(
             context, context.getPackageName() + ".fileprovider", apk);

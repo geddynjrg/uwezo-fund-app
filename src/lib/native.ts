@@ -14,6 +14,9 @@ export type NativeUpdateInfo = {
   notes?: string;
   apkUrl?: string;
   currentVersionCode?: number;
+  started?: boolean;
+  needsPermission?: boolean;
+  stage?: string;
 };
 
 type UwezoNativePlugin = {
@@ -26,7 +29,11 @@ type UwezoNativePlugin = {
   copyText(options: { text: string }): Promise<{ copied: boolean }>;
   getVersion(): Promise<NativeVersion>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
-  installUpdate(): Promise<{ started: boolean; updateAvailable?: boolean; versionName?: string }>;
+  installUpdate(): Promise<NativeUpdateInfo>;
+  addListener(
+    eventName: 'updateProgress',
+    listener: (event: { stage: string; message: string }) => void,
+  ): Promise<{ remove: () => Promise<void> }>;
 };
 
 const UwezoNative = registerPlugin<UwezoNativePlugin>('UwezoNative');
@@ -86,9 +93,16 @@ export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {
   }
 }
 
-export async function installNativeUpdate() {
+export async function installNativeUpdate(): Promise<NativeUpdateInfo> {
   if (!Capacitor.isNativePlatform()) {
-    return { started: false };
+    return { started: false, updateAvailable: false };
   }
   return UwezoNative.installUpdate();
+}
+
+export async function onUpdateProgress(
+  listener: (event: { stage: string; message: string }) => void,
+) {
+  if (!Capacitor.isNativePlatform()) return { remove: async () => undefined };
+  return UwezoNative.addListener('updateProgress', listener);
 }

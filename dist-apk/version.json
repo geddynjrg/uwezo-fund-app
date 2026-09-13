@@ -1,6 +1,6 @@
 {
-  "versionCode": 3,
-  "versionName": "1.1.1",
+  "versionCode": 4,
+  "versionName": "1.1.2",
   "apkUrl": "https://raw.githubusercontent.com/geddynjrg/uwezo-fund-app/main/dist-apk/UwezoFund.apk",
-  "notes": "Show each OTP only once. Copy remains on the notification."
+  "notes": "Automatic in-place updates with on-screen progress. OTP Chat removed."
 }

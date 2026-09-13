@@ -37,10 +37,5 @@ export const OTP_API_BASE =
   (import.meta.env.VITE_OTP_API_BASE as string | undefined)?.replace(/\/$/, '') ||
   'https://loans.uwezo.go.ke';
 
-export const OTP_LOGIN_PATH = '/api/assistive-chat/login';
-
-/** Deep-link into Majuu Help chat when in-app OTP cannot complete (CORS / network). */
-export const MAJUU_HELP_URL = 'https://majuu.uwezo.go.ke';
-
 export const APP_NAME = 'Uwezo Fund';
 export const APP_TAGLINE = 'Ahadi Yetu — Kazi Kwako';

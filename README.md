@@ -1,7 +1,7 @@
 # Uwezo Fund App
 
 Mobile-first **PWA** (Vite + React + TypeScript) with **Capacitor** Android packaging.
-Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and the official website, plus an in-app **OTP Chat** for phone login.
+Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and the official website, plus account sign-in, notifications, and App QR login.
 
 ## Project location
 
@@ -15,7 +15,7 @@ Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and
 | Debug alias | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/dist-apk/UwezoFund-debug.apk` |
 | Gradle output | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/android/app/build/outputs/apk/debug/app-debug.apk` |
 
-This is an **installable debug APK** (debug-signed). Size ≈ **5.7 MB**. Package id: `ke.go.uwezo.fundapp`. Version **1.1.1** (`versionCode` 3).
+This is an **installable debug APK** (debug-signed). Size ≈ **5.7 MB**. Package id: `ke.go.uwezo.fundapp`. Version **1.1.2** (`versionCode` 4).
 
 ### Install on an Android phone (sideload)
 
@@ -32,11 +32,12 @@ No Play Store listing is required for this sideload build.
 
 Keep the same package id and a **higher `versionCode`**. The phone then offers **Update** instead of a conflict.
 
-From 1.1.0 onward the app also:
+From 1.1.2 onward the app:
 
-- Checks GitHub (`dist-apk/version.json`) a few seconds after launch.
-- Downloads the new APK and opens the system installer so the update replaces the existing app.
-- Exposes **Check for app update** on the home screen.
+- Checks GitHub (`dist-apk/version.json`) shortly after opening the home screen.
+- Shows **Checking / Downloading / Installing** on screen.
+- Downloads the APK and starts the system installer so it replaces the existing app.
+- **Check for app update** runs the same download-and-install flow.
 
 Android still shows a one-tap Install/Update confirmation. Fully silent Play Store auto-update is not possible for a sideloaded APK. Allow **Install unknown apps** for Uwezo Fund when asked.
 
@@ -105,25 +106,7 @@ When a code arrives:
 
 Battery optimization: Android may ask to ignore battery restrictions so listening can continue after reboot.
 
-## OTP Chat — what it does
-
-WhatsApp-style thread that mirrors Majuu / loans **Help chat** phone OTP:
-
-1. User enters Kenyan mobile (`07…` / `+2547…`)
-2. App `POST`s `{ method: "phone_send", phone }` to  
-   `{VITE_OTP_API_BASE}/api/assistive-chat/login`
-3. User enters 6-digit code → `{ method: "phone_verify", requestId, otp }`
-4. On success, shows a short session note (user id when returned)
-
-**Default API base:** `https://majuu.uwezo.go.ke`  
-Override with `VITE_OTP_API_BASE` (e.g. `https://loans.uwezo.go.ke`).
-
-### Wired vs fallback
-
-- **Wired:** Same assistive-chat login contract as Majuu portal (`phone_send` / `phone_verify`).
-- **CORS / network failure:** Chat UI stays usable; messages explain the failure and offer **Open Majuu Help** (`https://majuu.uwezo.go.ke`) so users can finish OTP in the portal Help widget.
-- Native WebView (APK) is preferable to a cross-origin browser tab for session cookies.
-- Meta WhatsApp OTP is **not** required for this v1.
+Phone login on the website (Help chat) is unchanged. This app no longer has an **OTP Chat** button — use **Create account / Sign in** or **Scan App QR**.
 
 ## Requirements
 

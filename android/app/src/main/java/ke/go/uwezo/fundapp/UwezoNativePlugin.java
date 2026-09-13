@@ -100,31 +100,55 @@ public class UwezoNativePlugin extends Plugin {
     new Thread(
             () -> {
               try {
+                notifyStage("checking", "Checking for an update…");
                 AppUpdateHelper.Manifest m = AppUpdateHelper.fetchManifest();
                 if (m.versionCode <= BuildConfig.VERSION_CODE) {
                   JSObject ret = new JSObject();
                   ret.put("started", false);
                   ret.put("updateAvailable", false);
+                  ret.put("versionName", BuildConfig.VERSION_NAME);
+                  ret.put("stage", "up_to_date");
                   call.resolve(ret);
                   return;
                 }
+                if (!AppUpdateHelper.canInstall(getContext())) {
+                  android.os.Handler handler =
+                      new android.os.Handler(android.os.Looper.getMainLooper());
+                  handler.post(
+                      () -> AppUpdateHelper.requestInstallPermission(getContext()));
+                  JSObject ret = new JSObject();
+                  ret.put("started", false);
+                  ret.put("updateAvailable", true);
+                  ret.put("needsPermission", true);
+                  ret.put("versionName", m.versionName);
+                  ret.put("stage", "needs_permission");
+                  call.resolve(ret);
+                  return;
+                }
+                notifyStage("downloading", "Downloading version " + m.versionName + "…");
                 File apk = AppUpdateHelper.downloadApk(getContext(), m.apkUrl);
+                notifyStage("installing", "Installing version " + m.versionName + "…");
                 android.os.Handler handler =
                     new android.os.Handler(android.os.Looper.getMainLooper());
-                handler.post(
-                    () -> {
-                      AppUpdateHelper.promptInstall(getContext(), apk);
-                    });
+                handler.post(() -> AppUpdateHelper.promptInstall(getContext(), apk));
                 JSObject ret = new JSObject();
                 ret.put("started", true);
                 ret.put("updateAvailable", true);
                 ret.put("versionName", m.versionName);
+                ret.put("stage", "installing");
                 call.resolve(ret);
               } catch (Exception e) {
                 call.reject("Could not install update: " + e.getMessage());
               }
             })
         .start();
+  }
+
+  private void notifyStage(String stage, String message) {
+    JSObject data = new JSObject();
+    data.put("stage", stage);
+    data.put("message", message);
+    notifyListeners("updateProgress", data);
   }
 
   private void requestBatteryExemption() {

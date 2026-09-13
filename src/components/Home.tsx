@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
 import type { AppSession } from '../lib/session';
-import { checkForNativeUpdate, installNativeUpdate } from '../lib/native';
+import {
+  installNativeUpdate,
+  onUpdateProgress,
+} from '../lib/native';
 
 type HomeProps = {
-  onOpenChat: () => void;
   onOpenQr: () => void;
   onOpenAccount: () => void;
   onOpenNotifications: () => void;
@@ -17,7 +19,6 @@ type HomeProps = {
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 
 export function Home({
-  onOpenChat,
   onOpenQr,
   onOpenAccount,
   onOpenNotifications,
@@ -27,29 +28,57 @@ export function Home({
   const [updateNote, setUpdateNote] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
 
-  async function onCheckUpdate() {
+  async function runUpdate(fromUser: boolean) {
     setUpdateBusy(true);
-    setUpdateNote('Checking for an update…');
+    if (fromUser) {
+      setUpdateNote('Checking for an update, then downloading and installing if one is available…');
+    }
     try {
-      const info = await checkForNativeUpdate();
-      if (!info) {
-        setUpdateNote('Open the Android app to check for updates.');
+      const result = await installNativeUpdate();
+      if (result.needsPermission) {
+        setUpdateNote(
+          `Version ${result.versionName || 'new'} is ready. Allow “Install unknown apps” for Uwezo Fund, then tap Check for app update again.`,
+        );
         return;
       }
-      if (!info.updateAvailable) {
-        setUpdateNote(`You are on the latest version (${info.versionName || '1.1.1'}).`);
+      if (!result.updateAvailable) {
+        setUpdateNote(
+          fromUser
+            ? `You already have the latest version (${result.versionName || '1.1.2'}).`
+            : '',
+        );
         return;
       }
-      setUpdateNote(
-        `Version ${info.versionName || 'new'} is available. Installing over the current app…`,
-      );
-      await installNativeUpdate();
+      if (result.started) {
+        setUpdateNote(
+          `Downloaded version ${result.versionName || 'new'}. Android is installing it over this app — tap Update when asked. You do not uninstall first.`,
+        );
+        return;
+      }
+      setUpdateNote('No installer started. Try Check for app update again.');
     } catch (err) {
       setUpdateNote(err instanceof Error ? err.message : 'Could not update the app.');
     } finally {
       setUpdateBusy(false);
     }
   }
+
+  useEffect(() => {
+    let remove: (() => Promise<void>) | undefined;
+    void onUpdateProgress((event) => {
+      if (event.message) setUpdateNote(event.message);
+    }).then((handle) => {
+      remove = () => handle.remove();
+    });
+    const timer = window.setTimeout(() => {
+      void runUpdate(false);
+    }, 1800);
+    return () => {
+      window.clearTimeout(timer);
+      void remove?.();
+    };
+  }, []);
+
   return (
     <main className="home">
       <header className="home-hero">
@@ -65,7 +94,7 @@ export function Home({
         <p className="home-tagline">Ahadi Yetu — Kazi Kwako</p>
         <p className="home-lede">
           Quick access to Wezesha Majuu, loan applications, and the official site —
-          plus account sign-in, App QR browser login, and OTP chat.
+          plus account sign-in and App QR browser login.
         </p>
         {session ? (
           <p className="home-session">
@@ -135,26 +164,20 @@ export function Home({
         <p className="home-chat-note">
           Option B: scan website/chat QR, verify identity if needed, then confirm.
         </p>
-        <button type="button" className="btn-ghost" onClick={onOpenChat}>
-          OTP Chat — login with phone
-        </button>
-        <p className="home-chat-note">
-          Request an SMS code and verify — same flow as Majuu / loans Help chat.
-        </p>
         <button
           type="button"
           className="btn-ghost"
-          onClick={() => void onCheckUpdate()}
+          onClick={() => void runUpdate(true)}
           disabled={updateBusy}
         >
-          {updateBusy ? 'Checking for update…' : 'Check for app update'}
+          {updateBusy ? 'Updating…' : 'Check for app update'}
         </button>
         {updateNote ? <p className="home-chat-note">{updateNote}</p> : null}
       </section>
 
       <footer className="home-footer">
         <p>Republic of Kenya · Uwezo Fund</p>
-        <p>App 1.1.1 · updates install over the existing app</p>
+        <p>App 1.1.2 · updates download and install over this app</p>
       </footer>
     </main>
   );

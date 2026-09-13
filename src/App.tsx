@@ -4,7 +4,6 @@ import { App as CapApp } from '@capacitor/app';
 import { AccountAuth } from './components/AccountAuth';
 import { Home } from './components/Home';
 import { Notifications } from './components/Notifications';
-import { OtpChat } from './components/OtpChat';
 import { QrLoginScan } from './components/QrLoginScan';
 import {
   getActiveSession,
@@ -17,15 +16,13 @@ import { syncInbox } from './lib/inboxSync';
 import { ensureFreshSession } from './lib/keepSession';
 import { ensureNotifyPermission } from './lib/notify';
 import {
-  checkForNativeUpdate,
   copyOtpText,
   extractOtpCode,
-  installNativeUpdate,
   startOtpListener,
 } from './lib/native';
 import './App.css';
 
-type Screen = 'home' | 'chat' | 'qr' | 'account' | 'notifications';
+type Screen = 'home' | 'qr' | 'account' | 'notifications';
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -126,25 +123,6 @@ function App() {
     };
   }, [screen]);
 
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void checkForNativeUpdate()
-        .then((info) => {
-          if (cancelled || !info?.updateAvailable) return;
-          return installNativeUpdate();
-        })
-        .catch(() => {
-          // keep using the installed build
-        });
-    }, 2500);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, []);
-
   const toastCode = toast ? extractOtpCode(toast.body) : null;
   const toastUi = toast ? (
     <div className="app-toast">
@@ -173,14 +151,6 @@ function App() {
     </div>
   ) : null;
 
-  if (screen === 'chat') {
-    return (
-      <>
-        <OtpChat onBack={() => setScreen('home')} />
-        {toastUi}
-      </>
-    );
-  }
   if (screen === 'qr') {
     return (
       <>
@@ -204,7 +174,6 @@ function App() {
   return (
     <>
       <Home
-        onOpenChat={() => setScreen('chat')}
         onOpenQr={() => setScreen('qr')}
         onOpenAccount={() => setScreen('account')}
         onOpenNotifications={() => setScreen('notifications')}
