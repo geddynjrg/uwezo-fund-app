@@ -443,6 +443,20 @@
 .notif {
   text-align: left;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.notif__body {
+  text-align: left;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
   cursor: pointer;
 }
 
@@ -463,7 +477,7 @@
   z-index: 80;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.45rem;
   text-align: left;
   padding: 0.85rem 1rem;
   border: 1px solid var(--uf-line);
@@ -475,6 +489,18 @@
   font: inherit;
 }
 
+.app-toast__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
 .app-toast strong {
   font-size: 0.95rem;
 }
@@ -483,6 +509,19 @@
   font-size: 0.88rem;
   color: var(--uf-muted);
   white-space: pre-wrap;
+}
+
+.app-toast__copy,
+.notif__copy {
+  align-self: flex-start;
+  border: 1px solid var(--uf-line);
+  background: var(--uf-green);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 @media (min-width: 720px) {

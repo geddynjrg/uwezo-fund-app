@@ -18,6 +18,7 @@ import {
   saveSession,
   type AppSession,
 } from '../lib/session';
+import { stopOtpListener } from '../lib/native';
 
 type Mode = 'menu' | 'login' | 'signup' | 'reset' | 'signed_in';
 
@@ -206,6 +207,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
 
   function signOut() {
     clearSession();
+    void stopOtpListener();
     applySession(null);
     setMode('menu');
     setMessage('Signed out.');

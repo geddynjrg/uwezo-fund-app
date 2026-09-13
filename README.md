@@ -15,7 +15,7 @@ Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and
 | Debug alias | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/dist-apk/UwezoFund-debug.apk` |
 | Gradle output | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/android/app/build/outputs/apk/debug/app-debug.apk` |
 
-This is an **installable debug APK** (debug-signed). Size ≈ **5.3 MB**. Package id: `ke.go.uwezo.fundapp`.
+This is an **installable debug APK** (debug-signed). Size ≈ **5.7 MB**. Package id: `ke.go.uwezo.fundapp`. Version **1.1.0** (`versionCode` 2).
 
 ### Install on an Android phone (sideload)
 
@@ -23,9 +23,22 @@ This is an **installable debug APK** (debug-signed). Size ≈ **5.3 MB**. Packag
 2. On the phone: open the file with **Files** / **Downloads**.
 3. If prompted, allow **Install unknown apps** for that source (Chrome, Files, Drive, etc.).
 4. Tap **Install** → **Open**.
-5. Icon uses the official Uwezo Fund crest.
+5. If Uwezo Fund is already installed from an earlier APK with the same package id, this build **updates in place**. You do not uninstall first.
+6. Icon uses the official Uwezo Fund crest.
 
 No Play Store listing is required for this sideload build.
+
+### Later updates (no uninstall)
+
+Keep the same package id and a **higher `versionCode`**. The phone then offers **Update** instead of a conflict.
+
+From 1.1.0 onward the app also:
+
+- Checks GitHub (`dist-apk/version.json`) a few seconds after launch.
+- Downloads the new APK and opens the system installer so the update replaces the existing app.
+- Exposes **Check for app update** on the home screen.
+
+Android still shows a one-tap Install/Update confirmation. Fully silent Play Store auto-update is not possible for a sideloaded APK. Allow **Install unknown apps** for Uwezo Fund when asked.
 
 ### Rebuild the APK (this machine)
 
@@ -79,6 +92,18 @@ Wire `signingConfigs` in `android/app/build.gradle` to that keystore before ship
 | Loan application | https://loans.uwezo.go.ke |
 | Website | https://www.uwezo.go.ke (from portal `site-config`) |
 | Loans staging (opt-in) | Set `VITE_SHOW_LOANS_STAGING=true` + `VITE_LOANS_STAGING_URL` |
+
+## OTP on this phone (background)
+
+Stay signed in once. A native listener keeps polling Loans and Wezesha Majuu for OTP inbox items even if you leave or swipe the app away (a small “Listening for OTP” status notification stays visible).
+
+When a code arrives:
+
+1. A heads-up notification shows the OTP.
+2. Tap **Copy OTP** on that notification (the app does not need to be open).
+3. Paste the 6-digit code on the website, Help chat, or wherever you were asked.
+
+Battery optimization: Android may ask to ignore battery restrictions so listening can continue after reboot.
 
 ## OTP Chat — what it does
 

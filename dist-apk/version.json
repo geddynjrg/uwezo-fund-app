@@ -1,0 +1,6 @@
+{
+  "versionCode": 2,
+  "versionName": "1.1.0",
+  "apkUrl": "https://raw.githubusercontent.com/geddynjrg/uwezo-fund-app/main/dist-apk/UwezoFund.apk",
+  "notes": "Background OTP listener, copy the code from the notification, and install updates over the existing app."
+}

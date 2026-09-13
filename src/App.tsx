@@ -16,6 +16,13 @@ import { registerPushDevice, INBOX_ORIGINS, canonicalAuthOrigin } from './lib/ap
 import { syncInbox } from './lib/inboxSync';
 import { ensureFreshSession } from './lib/keepSession';
 import { ensureNotifyPermission } from './lib/notify';
+import {
+  checkForNativeUpdate,
+  copyOtpText,
+  extractOtpCode,
+  installNativeUpdate,
+  startOtpListener,
+} from './lib/native';
 import './App.css';
 
 type Screen = 'home' | 'chat' | 'qr' | 'account' | 'notifications';
@@ -54,6 +61,9 @@ function App() {
         // optional
       });
     }
+    void startOtpListener(session).catch(() => {
+      // native listener is optional on web
+    });
   }, [session]);
 
   useEffect(() => {
@@ -67,7 +77,9 @@ function App() {
       try {
         const current = getActiveSession() || session;
         if (!current) return;
-        const fresh = await syncInbox(current, { alert: true });
+        const fresh = await syncInbox(current, {
+          alert: !Capacitor.isNativePlatform(),
+        });
         if (!cancelled && fresh[0]) setToast(fresh[0]);
       } catch {
         // ignore poll errors
@@ -114,18 +126,51 @@ function App() {
     };
   }, [screen]);
 
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void checkForNativeUpdate()
+        .then((info) => {
+          if (cancelled || !info?.updateAvailable) return;
+          return installNativeUpdate();
+        })
+        .catch(() => {
+          // keep using the installed build
+        });
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  const toastCode = toast ? extractOtpCode(toast.body) : null;
   const toastUi = toast ? (
-    <button
-      type="button"
-      className="app-toast"
-      onClick={() => {
-        setToast(null);
-        setScreen('notifications');
-      }}
-    >
-      <strong>{toast.title}</strong>
-      <span>{toast.body}</span>
-    </button>
+    <div className="app-toast">
+      <button
+        type="button"
+        className="app-toast__body"
+        onClick={() => {
+          setToast(null);
+          setScreen('notifications');
+        }}
+      >
+        <strong>{toast.title}</strong>
+        <span>{toast.body}</span>
+      </button>
+      {toastCode ? (
+        <button
+          type="button"
+          className="app-toast__copy"
+          onClick={() => {
+            void copyOtpText(toastCode);
+          }}
+        >
+          Copy OTP
+        </button>
+      ) : null}
+    </div>
   ) : null;
 
   if (screen === 'chat') {

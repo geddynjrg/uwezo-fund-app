@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
 import type { AppSession } from '../lib/session';
+import { checkForNativeUpdate, installNativeUpdate } from '../lib/native';
 
 type HomeProps = {
   onOpenChat: () => void;
@@ -22,6 +24,32 @@ export function Home({
   session = null,
   showStaging = false,
 }: HomeProps) {
+  const [updateNote, setUpdateNote] = useState('');
+  const [updateBusy, setUpdateBusy] = useState(false);
+
+  async function onCheckUpdate() {
+    setUpdateBusy(true);
+    setUpdateNote('Checking for an update…');
+    try {
+      const info = await checkForNativeUpdate();
+      if (!info) {
+        setUpdateNote('Open the Android app to check for updates.');
+        return;
+      }
+      if (!info.updateAvailable) {
+        setUpdateNote(`You are on the latest version (${info.versionName || '1.1.0'}).`);
+        return;
+      }
+      setUpdateNote(
+        `Version ${info.versionName || 'new'} is available. Installing over the current app…`,
+      );
+      await installNativeUpdate();
+    } catch (err) {
+      setUpdateNote(err instanceof Error ? err.message : 'Could not update the app.');
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
   return (
     <main className="home">
       <header className="home-hero">
@@ -93,7 +121,8 @@ export function Home({
               Notifications
             </button>
             <p className="home-chat-note">
-              OTPs and loan status updates for your signed-in account.
+              Stay signed in so OTPs arrive as phone notifications even when this app is closed.
+              Tap Copy OTP on the notification, then paste the code where you need it.
             </p>
             <button type="button" className="btn-ghost" onClick={onOpenAccount}>
               Account settings
@@ -112,10 +141,20 @@ export function Home({
         <p className="home-chat-note">
           Request an SMS code and verify — same flow as Majuu / loans Help chat.
         </p>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => void onCheckUpdate()}
+          disabled={updateBusy}
+        >
+          {updateBusy ? 'Checking for update…' : 'Check for app update'}
+        </button>
+        {updateNote ? <p className="home-chat-note">{updateNote}</p> : null}
       </section>
 
       <footer className="home-footer">
         <p>Republic of Kenya · Uwezo Fund</p>
+        <p>App 1.1.0 · updates install over the existing app</p>
       </footer>
     </main>
   );
