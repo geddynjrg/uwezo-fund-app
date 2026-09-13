@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import type { AppNotification } from './session';
+import { extractOtpCode, type AppNotification } from './session';
+import { showNativeOtpAlert } from './native';
 
 const CHANNEL_ID = 'uwezo_alerts';
 let channelReady = false;
@@ -55,17 +56,28 @@ export async function ensureNotifyPermission() {
 
 export async function showPhoneAlert(item: AppNotification) {
   await ensureNotifyPermission();
-  const id = numericId(item.id || `${item.title}|${item.body}`);
+  const otp = extractOtpCode(item.body) || '';
   try {
     if (Capacitor.isNativePlatform()) {
+      const shown = await showNativeOtpAlert({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        kind: item.kind,
+        otp,
+      });
+      if (shown) return;
       await ensureChannel();
+      const id = numericId(item.id || `${item.title}|${item.body}`);
       await LocalNotifications.schedule({
         notifications: [
           {
             id,
             title: item.title,
-            body: item.body,
-            extra: { id: item.id, kind: item.kind },
+            body: otp
+              ? `${otp} — open Notifications and tap Copy OTP, then paste the code.`
+              : item.body,
+            extra: { id: item.id, kind: item.kind, otp },
             channelId: CHANNEL_ID,
             schedule: { at: new Date(Date.now() + 150) },
           },
@@ -74,7 +86,10 @@ export async function showPhoneAlert(item: AppNotification) {
       return;
     }
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(item.title, { body: item.body, tag: item.id });
+      new Notification(item.title, {
+        body: otp ? `${otp} — copy this code and paste it where you were asked.` : item.body,
+        tag: item.id,
+      });
     }
   } catch {
     // keep in-app inbox even if the OS banner cannot be shown

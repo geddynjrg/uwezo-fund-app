@@ -198,7 +198,7 @@ export async function fetchInbox(input: {
   if (input.email) url.searchParams.set('email', input.email);
   if (input.phone) url.searchParams.set('phone', input.phone);
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), input.timeoutMs ?? 800);
+  const timer = window.setTimeout(() => ctrl.abort(), input.timeoutMs ?? 8000);
   try {
     const res = await fetch(url.toString(), {
       headers: { Accept: 'application/json' },

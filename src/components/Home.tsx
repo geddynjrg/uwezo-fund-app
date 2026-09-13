@@ -17,7 +17,7 @@ type HomeProps = {
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.1.4';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();

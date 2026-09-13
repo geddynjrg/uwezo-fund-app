@@ -15,7 +15,7 @@ Home screen: Uwezo Fund branding + links to Wezesha Majuu, loan application, and
 | Debug alias | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/dist-apk/UwezoFund-debug.apk` |
 | Gradle output | `/home/uwezoict/work/assistive-ai-eight/uwezo-fund-app/android/app/build/outputs/apk/debug/app-debug.apk` |
 
-This is an **installable debug APK** (debug-signed). Size ≈ **5.7 MB**. Package id: `ke.go.uwezo.fundapp`. Version **1.1.2** (`versionCode` 4).
+This is an **installable debug APK** (debug-signed). Size ≈ **5.7 MB**. Package id: `ke.go.uwezo.fundapp`. Version **1.1.4** (`versionCode` 6).
 
 ### Install on an Android phone (sideload)
 

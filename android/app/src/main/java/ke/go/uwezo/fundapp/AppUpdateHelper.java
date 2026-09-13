@@ -18,8 +18,10 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 final class AppUpdateHelper {
-  static final String MANIFEST_URL =
-      "https://loans.uwezo.go.ke/uwezo-app/version.json";
+  static final String[] MANIFEST_URLS = {
+    "https://loans.uwezo.go.ke/uwezo-app/version.json",
+    "https://loans.uwezo.go.ke/app/version.json",
+  };
 
   static class Manifest {
     int versionCode;
@@ -31,7 +33,20 @@ final class AppUpdateHelper {
   private AppUpdateHelper() {}
 
   static Manifest fetchManifest() throws Exception {
-    HttpURLConnection conn = (HttpURLConnection) new URL(MANIFEST_URL).openConnection();
+    Exception last = null;
+    for (String manifestUrl : MANIFEST_URLS) {
+      try {
+        return fetchManifest(manifestUrl);
+      } catch (Exception e) {
+        last = e;
+      }
+    }
+    if (last != null) throw last;
+    throw new IllegalStateException("Could not read the app update list.");
+  }
+
+  private static Manifest fetchManifest(String manifestUrl) throws Exception {
+    HttpURLConnection conn = (HttpURLConnection) new URL(manifestUrl).openConnection();
     conn.setConnectTimeout(12000);
     conn.setReadTimeout(12000);
     conn.setInstanceFollowRedirects(true);
@@ -52,18 +67,45 @@ final class AppUpdateHelper {
   }
 
   static File downloadApk(Context context, String apkUrl) throws Exception {
+    Exception last = null;
+    String[] urls = {
+      apkUrl,
+      "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
+      "https://loans.uwezo.go.ke/app/UwezoFund.apk",
+    };
+    for (String url : urls) {
+      if (url == null || url.trim().isEmpty()) continue;
+      try {
+        return downloadApkOnce(context, url.trim());
+      } catch (Exception e) {
+        last = e;
+      }
+    }
+    if (last != null) throw last;
+    throw new IllegalStateException("Could not download the app update.");
+  }
+
+  private static File downloadApkOnce(Context context, String apkUrl) throws Exception {
     File out = new File(context.getCacheDir(), "UwezoFund-update.apk");
     HttpURLConnection conn = (HttpURLConnection) new URL(apkUrl).openConnection();
     conn.setConnectTimeout(20000);
     conn.setReadTimeout(60000);
     conn.setInstanceFollowRedirects(true);
     conn.setRequestProperty("User-Agent", "UwezoFundApp/1.1");
+    int code = conn.getResponseCode();
+    if (code < 200 || code >= 300) {
+      conn.disconnect();
+      throw new java.io.IOException("HTTP " + code + " for " + apkUrl);
+    }
     try (InputStream in = conn.getInputStream(); FileOutputStream fos = new FileOutputStream(out)) {
       byte[] buf = new byte[8192];
       int n;
       while ((n = in.read(buf)) >= 0) fos.write(buf, 0, n);
     } finally {
       conn.disconnect();
+    }
+    if (!out.isFile() || out.length() < 100_000L) {
+      throw new java.io.IOException("Update file was incomplete.");
     }
     return out;
   }

@@ -1,9 +1,12 @@
 package ke.go.uwezo.fundapp;
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
@@ -38,6 +41,7 @@ public class UwezoNativePlugin extends Plugin {
       }
     }
     OtpPrefs.saveAccount(getContext(), email, phone, origins);
+    requestNotifyPermission();
     requestBatteryExemption();
     OtpInboxService.ensureStarted(getContext());
     JSObject ret = new JSObject();
@@ -50,6 +54,22 @@ public class UwezoNativePlugin extends Plugin {
     OtpPrefs.clearAccount(getContext());
     OtpInboxService.stop(getContext());
     call.resolve();
+  }
+
+  @PluginMethod
+  public void showOtpAlert(PluginCall call) {
+    String id = call.getString("id", "");
+    String title = call.getString("title", "Uwezo Fund");
+    String body = call.getString("body", "");
+    String kind = call.getString("kind", "otp");
+    String otp = call.getString("otp", "");
+    requestNotifyPermission();
+    OtpAlertNotifier.show(getContext(), id, title, body, kind, otp);
+    JSObject ret = new JSObject();
+    ret.put("shown", true);
+    boolean hasOtp = (otp != null && !otp.isEmpty()) || !OtpPrefs.extractOtp(body).isEmpty();
+    ret.put("hasOtp", hasOtp);
+    call.resolve(ret);
   }
 
   @PluginMethod
@@ -153,6 +173,21 @@ public class UwezoNativePlugin extends Plugin {
     data.put("stage", stage);
     data.put("message", message);
     notifyListeners("updateProgress", data);
+  }
+
+  private void requestNotifyPermission() {
+    try {
+      if (Build.VERSION.SDK_INT < 33) return;
+      Activity activity = getActivity();
+      if (activity == null) return;
+      if (activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+          == PackageManager.PERMISSION_GRANTED) {
+        return;
+      }
+      activity.requestPermissions(
+          new String[] {Manifest.permission.POST_NOTIFICATIONS}, 71003);
+    } catch (Exception ignored) {
+    }
   }
 
   private void requestBatteryExemption() {

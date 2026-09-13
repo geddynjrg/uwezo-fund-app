@@ -76,7 +76,7 @@ export async function syncInbox(
       origin: primary,
       email: session.email,
       phone: session.phone,
-      timeoutMs: 800,
+      timeoutMs: 8000,
     });
     fresh.push(...ingest(items, alert));
   } catch {
@@ -93,7 +93,7 @@ export async function syncInbox(
         origin,
         email: session.email,
         phone: session.phone,
-        timeoutMs: 800,
+        timeoutMs: 8000,
       }),
     ),
   ).then((results) => {

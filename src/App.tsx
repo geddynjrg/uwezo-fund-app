@@ -74,9 +74,7 @@ function App() {
       try {
         const current = getActiveSession() || session;
         if (!current) return;
-        const fresh = await syncInbox(current, {
-          alert: !Capacitor.isNativePlatform(),
-        });
+        const fresh = await syncInbox(current, { alert: true });
         if (!cancelled && fresh[0]) setToast(fresh[0]);
       } catch {
         // ignore poll errors

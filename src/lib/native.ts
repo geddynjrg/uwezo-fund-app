@@ -26,6 +26,13 @@ type UwezoNativePlugin = {
     origins: string[];
   }): Promise<{ started?: boolean }>;
   stopOtpListener(): Promise<void>;
+  showOtpAlert(options: {
+    id?: string;
+    title: string;
+    body: string;
+    kind?: string;
+    otp?: string;
+  }): Promise<{ shown?: boolean; hasOtp?: boolean }>;
   copyText(options: { text: string }): Promise<{ copied: boolean }>;
   getVersion(): Promise<NativeVersion>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
@@ -55,6 +62,28 @@ export async function startOtpListener(session: AppSession) {
 export async function stopOtpListener() {
   if (!Capacitor.isNativePlatform()) return;
   await UwezoNative.stopOtpListener();
+}
+
+export async function showNativeOtpAlert(input: {
+  id?: string;
+  title: string;
+  body: string;
+  kind?: string;
+  otp?: string;
+}) {
+  if (!Capacitor.isNativePlatform()) return false;
+  try {
+    const result = await UwezoNative.showOtpAlert({
+      id: input.id,
+      title: input.title,
+      body: input.body,
+      kind: input.kind,
+      otp: input.otp,
+    });
+    return Boolean(result.shown);
+  } catch {
+    return false;
+  }
 }
 
 export async function copyOtpText(text: string) {

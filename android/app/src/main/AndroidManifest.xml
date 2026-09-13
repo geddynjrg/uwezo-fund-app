@@ -29,6 +29,14 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <activity
+            android:name=".OtpCopyActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/AppTheme.Transparent" />
+
         <receiver
             android:name=".OtpCopyReceiver"
             android:exported="false">

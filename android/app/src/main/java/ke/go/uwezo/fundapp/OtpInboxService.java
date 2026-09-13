@@ -125,17 +125,41 @@ public class OtpInboxService extends Service {
         for (String key : keys) {
           if (OtpPrefs.isSeen(this, key)) seen = true;
         }
+        boolean recentOtp = !TextUtils.isEmpty(otp) && isRecentIso(item.optString("createdAt", ""));
+        if (firstPass && !recentOtp) {
+          for (String key : keys) {
+            OtpPrefs.rememberSeen(this, key);
+          }
+          continue;
+        }
+        if (seen) continue;
         for (String key : keys) {
           OtpPrefs.rememberSeen(this, key);
         }
-        if (firstPass) continue;
-        if (seen) continue;
         if ("otp".equals(kind) || "loan_status".equals(kind)) {
-          showAlert(id, title, body, kind, otp);
+          OtpAlertNotifier.show(this, id, title, body, kind, otp);
         }
       }
     }
     primed = true;
+  }
+
+  private boolean isRecentIso(String createdAt) {
+    if (TextUtils.isEmpty(createdAt) || createdAt.length() < 19) return true;
+    try {
+      String normalized = createdAt.trim();
+      if (normalized.endsWith("Z")) {
+        normalized = normalized.substring(0, normalized.length() - 1) + "+0000";
+      }
+      java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(
+          normalized.contains(".") ? "yyyy-MM-dd'T'HH:mm:ss.SSSZ" : "yyyy-MM-dd'T'HH:mm:ssZ",
+          java.util.Locale.US);
+      df.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+      long created = df.parse(normalized.replace("Z", "+0000")).getTime();
+      return System.currentTimeMillis() - created <= 15L * 60L * 1000L;
+    } catch (Exception e) {
+      return true;
+    }
   }
 
   private JSONArray fetchInbox(String origin, String email, String phone) throws Exception {
@@ -163,65 +187,6 @@ public class OtpInboxService extends Service {
     } finally {
       conn.disconnect();
     }
-  }
-
-  private void showAlert(String id, String title, String body, String kind, String otp) {
-    Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
-    if (open == null) open = new Intent(this, MainActivity.class);
-    open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-    int req;
-    if (!TextUtils.isEmpty(otp)) {
-      try {
-        req = 720000 + Integer.parseInt(otp);
-      } catch (NumberFormatException e) {
-        req = Math.abs(("otp|" + otp).hashCode());
-      }
-    } else {
-      req = Math.abs((id + body).hashCode());
-    }
-    if (req == 0) req = 71011;
-    PendingIntent content =
-        PendingIntent.getActivity(
-            this,
-            req,
-            open,
-            PendingIntent.FLAG_UPDATE_CURRENT | immutable());
-
-    Intent copy = new Intent(this, OtpCopyReceiver.class);
-    copy.setAction(OtpCopyReceiver.ACTION_COPY);
-    copy.putExtra(OtpCopyReceiver.EXTRA_OTP, otp);
-    copy.putExtra(OtpCopyReceiver.EXTRA_BODY, body);
-    PendingIntent copyPi =
-        PendingIntent.getBroadcast(
-            this,
-            req + 1,
-            copy,
-            PendingIntent.FLAG_UPDATE_CURRENT | immutable());
-
-    String displayBody = body;
-    NotificationCompat.Builder builder =
-        new NotificationCompat.Builder(this, CHANNEL_ALERT)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(displayBody)
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(displayBody))
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(false)
-            .setContentIntent(content)
-            .setColor(0xFF006B3F);
-
-    if ("otp".equals(kind) && !TextUtils.isEmpty(otp)) {
-      displayBody = otp + " — tap Copy OTP, then paste where you were asked for the code.";
-      builder
-          .setContentText(displayBody)
-          .setStyle(new NotificationCompat.BigTextStyle().bigText(displayBody))
-          .addAction(android.R.drawable.ic_menu_save, "Copy OTP", copyPi);
-    }
-
-    NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-    if (nm != null) nm.notify(req == 0 ? 71011 : req, builder.build());
   }
 
   private Notification listenerNotification() {
@@ -254,14 +219,8 @@ public class OtpInboxService extends Service {
     listen.enableVibration(false);
     listen.enableLights(false);
     listen.setLockscreenVisibility(Notification.VISIBILITY_SECRET);
-    NotificationChannel alert =
-        new NotificationChannel(
-            CHANNEL_ALERT, "OTP codes", NotificationManager.IMPORTANCE_HIGH);
-    alert.setDescription("Login codes you can copy from the notification");
-    alert.enableVibration(true);
-    alert.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
     nm.createNotificationChannel(listen);
-    nm.createNotificationChannel(alert);
+    OtpAlertNotifier.ensureChannel(this);
   }
 
   private void scheduleWatchdog() {

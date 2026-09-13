@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "1.1.3",
+  "versionCode": 6,
+  "versionName": "1.1.4",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Silent OTP listener, copyable OTP alerts, and a status message when no update is available."
+  "notes": "Copyable OTP phone notifications. Tap Copy OTP on the banner (or the banner itself) to copy the 6-digit code, then paste it on the website or chatbot."
 }
