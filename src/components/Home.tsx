@@ -37,7 +37,7 @@ export function Home({
         return;
       }
       if (!info.updateAvailable) {
-        setUpdateNote(`You are on the latest version (${info.versionName || '1.1.0'}).`);
+        setUpdateNote(`You are on the latest version (${info.versionName || '1.1.1'}).`);
         return;
       }
       setUpdateNote(
@@ -154,7 +154,7 @@ export function Home({
 
       <footer className="home-footer">
         <p>Republic of Kenya · Uwezo Fund</p>
-        <p>App 1.1.0 · updates install over the existing app</p>
+        <p>App 1.1.1 · updates install over the existing app</p>
       </footer>
     </main>
   );

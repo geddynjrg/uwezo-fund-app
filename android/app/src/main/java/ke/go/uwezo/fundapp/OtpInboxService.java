@@ -116,12 +116,22 @@ public class OtpInboxService extends Service {
         String body = item.optString("body", "");
         String kind = item.optString("kind", "system");
         String fingerprint = kind + "|" + title + "|" + body;
-        boolean freshId = OtpPrefs.rememberSeen(this, TextUtils.isEmpty(id) ? fingerprint : id);
-        boolean freshFp = OtpPrefs.rememberSeen(this, fingerprint);
+        String otp = OtpPrefs.extractOtp(body);
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        if (!TextUtils.isEmpty(id)) keys.add(id);
+        keys.add(fingerprint);
+        if (!TextUtils.isEmpty(otp)) keys.add("otp:" + otp);
+        boolean seen = false;
+        for (String key : keys) {
+          if (OtpPrefs.isSeen(this, key)) seen = true;
+        }
+        for (String key : keys) {
+          OtpPrefs.rememberSeen(this, key);
+        }
         if (firstPass) continue;
-        if (!freshId && !freshFp) continue;
+        if (seen) continue;
         if ("otp".equals(kind) || "loan_status".equals(kind)) {
-          showAlert(id, title, body, kind);
+          showAlert(id, title, body, kind, otp);
         }
       }
     }
@@ -155,12 +165,21 @@ public class OtpInboxService extends Service {
     }
   }
 
-  private void showAlert(String id, String title, String body, String kind) {
-    String otp = OtpPrefs.extractOtp(body);
+  private void showAlert(String id, String title, String body, String kind, String otp) {
     Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
     if (open == null) open = new Intent(this, MainActivity.class);
     open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-    int req = Math.abs((id + body).hashCode());
+    int req;
+    if (!TextUtils.isEmpty(otp)) {
+      try {
+        req = 720000 + Integer.parseInt(otp);
+      } catch (NumberFormatException e) {
+        req = Math.abs(("otp|" + otp).hashCode());
+      }
+    } else {
+      req = Math.abs((id + body).hashCode());
+    }
+    if (req == 0) req = 71011;
     PendingIntent content =
         PendingIntent.getActivity(
             this,

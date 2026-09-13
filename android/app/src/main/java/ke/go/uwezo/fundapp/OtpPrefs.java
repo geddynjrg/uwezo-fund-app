@@ -67,6 +67,11 @@ final class OtpPrefs {
     return out;
   }
 
+  static boolean isSeen(Context context, String id) {
+    if (TextUtils.isEmpty(id)) return false;
+    return seenIds(context).contains(id);
+  }
+
   static boolean rememberSeen(Context context, String id) {
     if (TextUtils.isEmpty(id)) return false;
     List<String> seen = seenIds(context);

@@ -31,6 +31,25 @@ export function noticeFingerprint(item: {
   return `${item.kind}|${item.title}|${item.body}`.slice(0, 400);
 }
 
+export function extractOtpCode(text: string): string | null {
+  const match = String(text || '').match(/\b(\d{6})\b/);
+  return match ? match[1] : null;
+}
+
+export function noticeDedupeKeys(item: {
+  id?: string;
+  title: string;
+  body: string;
+  kind: string;
+}) {
+  const keys = [item.id, noticeFingerprint(item)].filter(
+    (key): key is string => Boolean(key),
+  );
+  const code = extractOtpCode(item.body);
+  if (code) keys.push(`otp:${code}`);
+  return keys;
+}
+
 export function loadSeenNoticeKeys(): Set<string> {
   try {
     const raw = localStorage.getItem(SEEN_KEY);

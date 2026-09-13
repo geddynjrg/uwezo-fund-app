@@ -3,7 +3,7 @@ import { showPhoneAlert } from './notify';
 import {
   loadInbox,
   loadSeenNoticeKeys,
-  noticeFingerprint,
+  noticeDedupeKeys,
   rememberSeenNoticeKeys,
   upsertInbox,
   type AppNotification,
@@ -14,8 +14,7 @@ export const INBOX_UPDATED_EVENT = 'uwezo-inbox-updated';
 
 function seedSeenFromLocal(seen: Set<string>) {
   for (const row of loadInbox()) {
-    seen.add(row.id);
-    seen.add(noticeFingerprint(row));
+    for (const key of noticeDedupeKeys(row)) seen.add(key);
     if (row.meta?.id) seen.add(row.meta.id);
   }
 }
@@ -36,8 +35,7 @@ function ingest(
   const newKeys: string[] = [];
 
   for (const item of items.slice(0, 20)) {
-    const fingerprint = noticeFingerprint(item);
-    const keys = [item.id, fingerprint];
+    const keys = noticeDedupeKeys(item);
     const already = keys.some((key) => seen.has(key));
     const { notice, created } = upsertInbox({
       id: item.id,

@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { INBOX_ORIGINS, canonicalAuthOrigin } from './appAuth';
-import type { AppSession } from './session';
+import { extractOtpCode, type AppSession } from './session';
 
 export type NativeVersion = {
   versionCode: number;
@@ -31,10 +31,7 @@ type UwezoNativePlugin = {
 
 const UwezoNative = registerPlugin<UwezoNativePlugin>('UwezoNative');
 
-export function extractOtpCode(text: string): string | null {
-  const match = String(text || '').match(/\b(\d{6})\b/);
-  return match ? match[1] : null;
-}
+export { extractOtpCode };
 
 export async function startOtpListener(session: AppSession) {
   if (!Capacitor.isNativePlatform()) return;
