@@ -153,7 +153,16 @@ public class UwezoNativePlugin extends Plugin {
                 notifyStage("installing", "Installing version " + m.versionName + "…");
                 android.os.Handler handler =
                     new android.os.Handler(android.os.Looper.getMainLooper());
-                handler.post(() -> AppUpdateHelper.promptInstall(getContext(), apk));
+                final Activity activity = getActivity();
+                final Context installCtx = activity != null ? activity : getContext();
+                handler.post(
+                    () -> {
+                      try {
+                        AppUpdateHelper.promptInstall(installCtx, apk);
+                      } catch (Exception installErr) {
+                        android.util.Log.e("UwezoUpdate", "promptInstall failed", installErr);
+                      }
+                    });
                 JSObject ret = new JSObject();
                 ret.put("started", true);
                 ret.put("updateAvailable", true);
@@ -161,8 +170,12 @@ public class UwezoNativePlugin extends Plugin {
                 ret.put("stage", "installing");
                 call.resolve(ret);
               } catch (Exception e) {
-                call.reject(
-                    "The update could not be installed. You already have this version, or the update file is not available yet.");
+                android.util.Log.e("UwezoUpdate", "installUpdate failed", e);
+                String detail = e.getMessage();
+                if (detail == null || detail.trim().isEmpty()) {
+                  detail = e.getClass().getSimpleName();
+                }
+                call.reject("Update failed: " + detail);
               }
             })
         .start();

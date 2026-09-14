@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.1.5",
+  "versionCode": 8,
+  "versionName": "1.1.6",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Removed redundant Create account (phone OTP) button. Sign in creates the account if new. Portal OTP delivery prefers email over SMS."
+  "notes": "More reliable in-app updates (PackageInstaller). Clearer update errors. Sign in creates account if new."
 }

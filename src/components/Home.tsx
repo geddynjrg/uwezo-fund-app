@@ -17,15 +17,16 @@ type HomeProps = {
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
-const APP_VERSION = '1.1.4';
+const APP_VERSION = '1.1.6';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
   if (!text) return 'Could not update the app.';
-  if (/https?:\/\/|github|raw\.githubusercontent/i.test(text)) {
-    return 'The update could not be installed. You already have this version, or the update file is not available yet.';
+  // Hide raw URLs / GitHub paths, keep useful error text.
+  if (/github|raw\.githubusercontent/i.test(text)) {
+    return 'The update could not be downloaded. Check your connection and try again.';
   }
-  return text;
+  return text.replace(/https?:\/\/\S+/gi, '').replace(/\s{2,}/g, ' ').trim() || text;
 }
 
 export function Home({
