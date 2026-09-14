@@ -5,7 +5,6 @@ import {
   AUTH_ORIGINS,
   appLoginOrRegister,
   appResetPassword,
-  appSignup,
   canonicalAuthOrigin,
   defaultAuthOrigin,
   rememberAuthOrigin,
@@ -20,7 +19,7 @@ import {
 } from '../lib/session';
 import { stopOtpListener } from '../lib/native';
 
-type Mode = 'menu' | 'login' | 'signup' | 'reset' | 'signed_in';
+type Mode = 'menu' | 'login' | 'reset' | 'signed_in';
 
 type AccountAuthProps = {
   onBack: () => void;
@@ -33,8 +32,6 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [requestId, setRequestId] = useState('');
   const [remainSignedIn, setRemainSignedIn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -50,44 +47,6 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
   function applySession(next: AppSession | null) {
     setSession(next);
     onSessionChange?.(next);
-  }
-
-  async function sendPhoneOtp() {
-    const phoneNorm = normalizeKenyanPhone(phone);
-    if (!isLikelyKenyanMobile(phoneNorm)) {
-      setError('Enter a valid Kenyan mobile number.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      const res = await fetch(`${canonicalAuthOrigin(origin)}/api/assistive-chat/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        credentials: 'omit',
-        body: JSON.stringify({
-          method: 'phone_send',
-          phone: phoneNorm,
-          email: email.trim().toLowerCase() || undefined,
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok || data.ok === false) {
-        throw new Error(String(data.error || 'Could not send OTP'));
-      }
-      setPhone(phoneNorm);
-      setRequestId(String(data.requestId || ''));
-      setMessage(
-        String(
-          data.message ||
-            'OTP sent by SMS and to the Uwezo Fund app if you stayed signed in. Enter the 6-digit code.',
-        ),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'OTP send failed');
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function onLogin(e: FormEvent) {
@@ -142,50 +101,6 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     }
   }
 
-  async function onSignup(e: FormEvent) {
-    e.preventDefault();
-    if (!requestId) {
-      await sendPhoneOtp();
-      return;
-    }
-    const code = otp.replace(/\D/g, '');
-    if (code.length !== 6) {
-      setError('Enter the 6-digit OTP from SMS, email, or the Uwezo Fund app.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      const phoneNorm = normalizeKenyanPhone(phone);
-      const data = await appSignup({
-        origin: canonicalAuthOrigin(origin),
-        email,
-        password,
-        phone: phoneNorm,
-        requestId,
-        otp: code,
-      });
-      const next: AppSession = {
-        email: email.trim().toLowerCase(),
-        phone: phoneNorm,
-        accessToken: String(data.accessToken || data.access_token || ''),
-        refreshToken: String(data.refreshToken || data.refresh_token || '') || undefined,
-        origin: canonicalAuthOrigin(origin),
-        remainSignedIn,
-        verifiedAt: new Date().toISOString(),
-      };
-      if (!next.accessToken) throw new Error('Signup succeeded but no access token returned.');
-      saveSession(next);
-      applySession(next);
-      setMode('signed_in');
-      setMessage('Account created with verified phone. You are signed in.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Signup failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function onReset(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -222,7 +137,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
         <img src={logo} alt="" className="chat-header__logo" width={36} height={36} />
         <div className="chat-header__text">
           <strong>Account</strong>
-          <span>Create · sign in · reset · stay signed in</span>
+          <span>Sign in · reset · stay signed in</span>
         </div>
       </header>
 
@@ -234,9 +149,6 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
           <div className="chat-success__actions">
             <button type="button" className="btn-primary" onClick={() => setMode('login')}>
               Sign in (create if new)
-            </button>
-            <button type="button" className="btn-ghost" onClick={() => setMode('signup')}>
-              Create account (email + phone OTP)
             </button>
             <button type="button" className="btn-ghost" onClick={() => setMode('reset')}>
               Reset password
@@ -261,13 +173,12 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
           </div>
         ) : null}
 
-        {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
+        {(mode === 'login' || mode === 'reset') && (
           <form
             className="account-form"
             noValidate
             onSubmit={(e) => {
               if (mode === 'login') void onLogin(e);
-              else if (mode === 'signup') void onSignup(e);
               else void onReset(e);
             }}
           >
@@ -310,7 +221,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
                 Password
                 <input
                   type="password"
-                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -332,20 +243,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
                 />
               </label>
             ) : null}
-            {mode === 'signup' && requestId ? (
-              <label>
-                OTP code
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  disabled={busy}
-                  placeholder="6-digit code"
-                />
-              </label>
-            ) : null}
-            {mode === 'login' || mode === 'signup' ? (
+            {mode === 'login' ? (
               <label className="account-check">
                 <input
                   type="checkbox"
@@ -356,13 +254,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
               </label>
             ) : null}
             <button type="submit" className="btn-primary" disabled={busy}>
-              {mode === 'login'
-                ? 'Sign in'
-                : mode === 'signup'
-                  ? requestId
-                    ? 'Verify & create'
-                    : 'Send phone OTP'
-                  : 'Send reset link'}
+              {mode === 'login' ? 'Sign in' : 'Send reset link'}
             </button>
             <button
               type="button"
@@ -370,8 +262,6 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
               onClick={() => {
                 setMode('menu');
                 setError('');
-                setRequestId('');
-                setOtp('');
               }}
             >
               Back

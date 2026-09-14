@@ -209,7 +209,7 @@ export function QrLoginScan({ onBack }: QrLoginScanProps) {
       if (!res.ok || data.ok === false) {
         if (data.needEmail) {
           setPhase('email_fallback');
-          setError(String(data.error || 'SMS unavailable — enter linked email.'));
+          setError(String(data.error || 'Enter the email linked to this phone to receive a login code.'));
           return;
         }
         setError(String(data.error || 'Could not send OTP'));

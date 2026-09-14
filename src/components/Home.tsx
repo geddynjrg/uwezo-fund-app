@@ -156,10 +156,11 @@ export function Home({
         {!session ? (
           <>
             <button type="button" className="btn-primary" onClick={onOpenAccount}>
-              Create account / Sign in
+              Sign in
             </button>
             <p className="home-chat-note">
-              Email + verified phone, reset password, and remain signed in (Option A).
+              Email, phone, and password — new accounts are created automatically. Reset
+              password and remain signed in on this device.
             </p>
           </>
         ) : (
