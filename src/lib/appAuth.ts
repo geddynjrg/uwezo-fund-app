@@ -62,10 +62,11 @@ async function postJson(
   origin: string,
   path: string,
   body: Record<string, unknown>,
-  timeoutMs = 20000,
+  timeoutMs = 25000,
 ) {
   const url = `${origin.replace(/\/$/, '')}${path}`;
   const host = portalHost(origin);
+  const action = typeof body.action === 'string' ? body.action : '';
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
@@ -84,11 +85,18 @@ async function postJson(
     const aborted =
       (err instanceof DOMException && err.name === 'AbortError') ||
       (err instanceof Error && err.name === 'AbortError');
-    throw new Error(
-      aborted
-        ? `Sign-in timed out on ${host}. Wezesha Majuu and Loans are separate accounts — pick the portal you registered on.`
-        : `Could not reach ${host}. Check your connection, then try again.`,
-    );
+    if (aborted) {
+      const what =
+        action === 'reset_request'
+          ? 'Password reset'
+          : action === 'login_or_register' || action === 'signup'
+            ? 'Sign-in'
+            : 'Request';
+      throw new Error(
+        `${what} timed out on ${host}. Try again on mobile data or Wi‑Fi, or open https://${host}/reset in a browser. Loans and Wezesha Majuu are separate accounts.`,
+      );
+    }
+    throw new Error(`Could not reach ${host}. Check your connection, then try again.`);
   } finally {
     window.clearTimeout(timer);
   }
