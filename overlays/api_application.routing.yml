@@ -1,0 +1,27 @@
+api_application.download_pdf:
+  path: '/application/{application}/download-pdf'
+  defaults:
+    _controller: '\Drupal\api_application\Controller\ApplicationController::downloadPdf'
+    _title: 'Download PDF'
+  requirements:
+    _entity_access: 'application.view'
+    application: \d+
+  options:
+    _admin_route: TRUE
+    parameters:
+      application:
+        type: entity:application
+
+api_application.send_email_form:
+  path: '/application/{application}/send-email'
+  defaults:
+    _form: '\Drupal\api_application\Form\SendEmailForm'
+    _title: 'Send Email'
+  requirements:
+    _entity_access: 'application.view'
+    application: \d+
+  options:
+    _admin_route: TRUE
+    parameters:
+      application:
+        type: entity:application
