@@ -7,6 +7,7 @@ export type AuthOrigin =
 
 export const AUTH_ORIGINS: { id: AuthOrigin; label: string }[] = [
   { id: LINKS.loans.url as AuthOrigin, label: 'Loans' },
+  { id: LINKS.loansStaging.url as AuthOrigin, label: 'Loans (staging)' },
   { id: LINKS.majuu.url as AuthOrigin, label: 'Wezesha Majuu' },
 ];
 

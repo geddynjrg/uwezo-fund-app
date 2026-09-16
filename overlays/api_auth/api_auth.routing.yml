@@ -1,0 +1,94 @@
+api_auth.settings:
+  path: '/admin/config/app-services/api-auth'
+  defaults:
+    _form: '\Drupal\api_auth\Form\ApiAuthSettingsForm'
+    _title: 'API Auth Settings'
+  requirements:
+    _permission: 'administer site configuration'
+
+api_auth.token_management:
+  path: '/admin/config/app-services/api-auth/tokens'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\TokenManagementController::overview'
+    _title: 'Token Management'
+  requirements:
+    _permission: 'administer site configuration'
+
+api_auth.token_revoke:
+  path: '/admin/config/app-services/api-auth/tokens/{token_id}/revoke'
+  defaults:
+    _form: '\Drupal\api_auth\Form\TokenRevokeForm'
+    _title: 'Revoke Token'
+  requirements:
+    _permission: 'administer site configuration'
+  options:
+    parameters:
+      token_id:
+        type: integer
+
+api_auth.token_revoke_all:
+  path: '/admin/config/app-services/api-auth/tokens/revoke-all'
+  defaults:
+    _form: '\Drupal\api_auth\Form\TokenRevokeAllForm'
+    _title: 'Revoke All Tokens'
+  requirements:
+    _permission: 'administer site configuration'
+
+api_auth.ecitizen.initiate:
+  path: '/api/oauth/ecitizen/login'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\ECitizenOAuthController::startEcitizenOauth'
+    _title: 'eCitizen OAuth Initiation'
+  requirements:
+    _permission: 'access content'
+  options:
+    no_cache: 'TRUE'
+
+api_auth.ecitizen.callback:
+  path: '/api/oauth/ecitizen'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\ECitizenOAuthController::callback'
+    _title: 'eCitizen OAuth Callback'
+  methods: [GET]
+  requirements:
+    _permission: 'access content'
+  options:
+    no_cache: 'TRUE'
+
+
+api_auth.ecitizen_oauth:
+  path: '/api/v1/user/ecitizen-oauth'
+  defaults:
+    _controller: '\Drupal\api_auth\Plugin\rest\resource\ApiECitizenLoginResource::oauthExchange'
+    _plugin: 'api_ecitizen_login'
+  requirements:
+    _permission: 'restful post api_ecitizen_login'
+  options:
+    _auth: []
+
+api_auth.app_set_password:
+  path: '/api/v1/user/app-set-password'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\AppSetPasswordController::setPassword'
+    _title: 'App set password'
+  methods: [POST]
+  requirements:
+    _access: 'TRUE'
+  options:
+    no_cache: 'TRUE'
+    _auth: []
+
+api_auth.test_callback:
+  path: '/test-callback'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\TestCallbackController::capture'
+  requirements:
+    _permission: 'access content'
+
+api_auth.test_route:
+  path: '/api-test'
+  defaults:
+    _controller: '\Drupal\api_auth\Controller\TestRouteController::test'
+    _title: 'Test Route'
+  requirements:
+    _permission: 'access content'

@@ -203,7 +203,8 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
             <p className="home-chat-note">
               Signing in to {AUTH_ORIGINS.find((o) => o.id === origin)?.label} (
               {origin.replace(/^https:\/\//, '')}). Wezesha Majuu and Loans are separate
-              accounts.
+              accounts. If you used eCitizen on the website and never saved a password,
+              enter a new password here — it will be saved on this portal account.
             </p>
             <label>
               Email
