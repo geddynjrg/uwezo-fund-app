@@ -9,6 +9,18 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(UwezoNativePlugin.class);
     super.onCreate(savedInstanceState);
-    OtpInboxService.ensureStarted(this);
+    try {
+      OtpInboxService.ensureStarted(this);
+    } catch (Exception ignored) {
+    }
+  }
+
+  @Override
+  public void onStart() {
+    super.onStart();
+    try {
+      OtpInboxService.ensureStarted(this);
+    } catch (Exception ignored) {
+    }
   }
 }

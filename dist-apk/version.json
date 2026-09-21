@@ -1,6 +1,6 @@
 {
-  "versionCode": 8,
-  "versionName": "1.1.6",
+  "versionCode": 9,
+  "versionName": "1.1.7",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "More reliable in-app updates (PackageInstaller). Clearer update errors. Sign in creates account if new."
+  "notes": "Fix crash: Android no longer starts a dataSync foreground service after its daily quota. OTP alerts still work while the app is open."
 }

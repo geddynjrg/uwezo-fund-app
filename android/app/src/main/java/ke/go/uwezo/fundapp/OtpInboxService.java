@@ -11,10 +11,11 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
-import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.ServiceCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -31,51 +32,65 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class OtpInboxService extends Service {
+  private static final String TAG = "UwezoOtp";
   public static final String CHANNEL_LISTENER = "uwezo_otp_listener";
   public static final String CHANNEL_ALERT = "uwezo_otp_alert";
   private static final int LISTENER_NOTE_ID = 71001;
   private static final int WATCHDOG_REQ = 71002;
-  private static final long POLL_MS = 1500L;
+  private static final long POLL_MS = 4000L;
 
   private ScheduledExecutorService executor;
   private boolean primed;
 
   static void ensureStarted(Context context) {
+    cancelWatchdog(context);
     if (!OtpPrefs.hasAccount(context)) return;
     Intent intent = new Intent(context, OtpInboxService.class);
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      context.startForegroundService(intent);
-    } else {
+    try {
+      // Regular startService — never startForegroundService. Android 15+
+      // rejects dataSync FGS once the daily quota is exhausted, which crashed
+      // the previous build (ForegroundServiceStartNotAllowedException).
       context.startService(intent);
+    } catch (Exception e) {
+      Log.w(TAG, "OTP inbox listener not started", e);
     }
   }
 
   static void stop(Context context) {
-    context.stopService(new Intent(context, OtpInboxService.class));
+    cancelWatchdog(context);
+    try {
+      context.stopService(new Intent(context, OtpInboxService.class));
+    } catch (Exception e) {
+      Log.w(TAG, "OTP inbox listener stop failed", e);
+    }
   }
 
   @Override
   public void onCreate() {
     super.onCreate();
-    ensureChannels();
-    Notification listening = listenerNotification();
-    if (Build.VERSION.SDK_INT >= 34) {
-      startForeground(
-          LISTENER_NOTE_ID,
-          listening,
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-    } else {
-      startForeground(LISTENER_NOTE_ID, listening);
+    try {
+      cancelWatchdog(this);
+      ensureChannels();
+      // Never require a lasting dataSync FGS — that quota crash killed 1.1.6.
+      promoteThenDropForeground();
+      executor = Executors.newSingleThreadScheduledExecutor();
+      executor.scheduleWithFixedDelay(this::pollSafely, 0, POLL_MS, TimeUnit.MILLISECONDS);
+    } catch (Exception e) {
+      Log.e(TAG, "OTP inbox listener failed to start; app continues without it", e);
+      try {
+        stopSelf();
+      } catch (Exception ignored) {
+      }
     }
-    scheduleWatchdog();
-    executor = Executors.newSingleThreadScheduledExecutor();
-    executor.scheduleWithFixedDelay(this::pollSafely, 0, POLL_MS, TimeUnit.MILLISECONDS);
   }
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     if (!OtpPrefs.hasAccount(this)) {
-      stopForeground(true);
+      try {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+      } catch (Exception ignored) {
+      }
       stopSelf();
       return START_NOT_STICKY;
     }
@@ -91,6 +106,36 @@ public class OtpInboxService extends Service {
   @Override
   public IBinder onBind(Intent intent) {
     return null;
+  }
+
+  /**
+   * If a leftover alarm used startForegroundService, Android requires
+   * startForeground() quickly. Use shortService (not dataSync) then drop FGS
+   * so we do not consume the 6-hour dataSync quota.
+   */
+  private void promoteThenDropForeground() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+    Notification listening = listenerNotification();
+    try {
+      if (Build.VERSION.SDK_INT >= 34) {
+        startForeground(
+            LISTENER_NOTE_ID,
+            listening,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE);
+      } else {
+        startForeground(LISTENER_NOTE_ID, listening);
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "OTP listener cannot use a foreground service; continuing in-process", e);
+      try {
+        startForeground(LISTENER_NOTE_ID, listening);
+      } catch (Exception ignored) {
+      }
+    }
+    try {
+      ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+    } catch (Exception ignored) {
+    }
   }
 
   private void pollSafely() {
@@ -151,9 +196,10 @@ public class OtpInboxService extends Service {
       if (normalized.endsWith("Z")) {
         normalized = normalized.substring(0, normalized.length() - 1) + "+0000";
       }
-      java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(
-          normalized.contains(".") ? "yyyy-MM-dd'T'HH:mm:ss.SSSZ" : "yyyy-MM-dd'T'HH:mm:ssZ",
-          java.util.Locale.US);
+      java.text.SimpleDateFormat df =
+          new java.text.SimpleDateFormat(
+              normalized.contains(".") ? "yyyy-MM-dd'T'HH:mm:ss.SSSZ" : "yyyy-MM-dd'T'HH:mm:ssZ",
+              java.util.Locale.US);
       df.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
       long created = df.parse(normalized.replace("Z", "+0000")).getTime();
       return System.currentTimeMillis() - created <= 15L * 60L * 1000L;
@@ -190,18 +236,15 @@ public class OtpInboxService extends Service {
   }
 
   private Notification listenerNotification() {
-    // Android requires a foreground-service notification, but keep it silent
-    // and out of the shade as far as the OS allows.
     return new NotificationCompat.Builder(this, CHANNEL_LISTENER)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("Uwezo Fund")
         .setContentText("")
         .setPriority(NotificationCompat.PRIORITY_MIN)
         .setSilent(true)
-        .setOngoing(true)
+        .setOngoing(false)
         .setShowWhen(false)
         .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
         .build();
   }
 
@@ -223,25 +266,35 @@ public class OtpInboxService extends Service {
     OtpAlertNotifier.ensureChannel(this);
   }
 
-  private void scheduleWatchdog() {
-    Intent intent = new Intent(this, OtpInboxService.class);
-    PendingIntent pi;
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      pi =
-          PendingIntent.getForegroundService(
-              this, WATCHDOG_REQ, intent, PendingIntent.FLAG_UPDATE_CURRENT | immutable());
-    } else {
-      pi =
+  static void cancelWatchdog(Context context) {
+    try {
+      Intent intent = new Intent(context, OtpInboxService.class);
+      PendingIntent pi;
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        pi =
+            PendingIntent.getForegroundService(
+                context, WATCHDOG_REQ, intent, PendingIntent.FLAG_NO_CREATE | immutable());
+        if (pi != null) {
+          AlarmManager am = (AlarmManager) context.getSystemService(ALARM_SERVICE);
+          if (am != null) am.cancel(pi);
+          pi.cancel();
+        }
+        pi =
+            PendingIntent.getForegroundService(
+                context, WATCHDOG_REQ, intent, PendingIntent.FLAG_UPDATE_CURRENT | immutable());
+        AlarmManager am = (AlarmManager) context.getSystemService(ALARM_SERVICE);
+        if (am != null) am.cancel(pi);
+        pi.cancel();
+      }
+      PendingIntent servicePi =
           PendingIntent.getService(
-              this, WATCHDOG_REQ, intent, PendingIntent.FLAG_UPDATE_CURRENT | immutable());
+              context, WATCHDOG_REQ, intent, PendingIntent.FLAG_UPDATE_CURRENT | immutable());
+      AlarmManager am = (AlarmManager) context.getSystemService(ALARM_SERVICE);
+      if (am != null) am.cancel(servicePi);
+      servicePi.cancel();
+    } catch (Exception e) {
+      Log.w(TAG, "Could not cancel leftover OTP watchdog", e);
     }
-    AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-    if (am == null) return;
-    am.setRepeating(
-        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-        SystemClock.elapsedRealtime() + 60_000L,
-        60_000L,
-        pi);
   }
 
   private static int immutable() {

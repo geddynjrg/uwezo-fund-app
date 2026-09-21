@@ -12,7 +12,10 @@ public class OtpBootReceiver extends BroadcastReceiver {
     if (Intent.ACTION_BOOT_COMPLETED.equals(action)
         || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
         || Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
+    try {
       OtpInboxService.ensureStarted(context);
+    } catch (Exception ignored) {
+    }
     }
   }
 }
