@@ -120,6 +120,21 @@ async function postJson(
 }
 
 /** Option A upsert login: create account if missing when phone was verified. */
+/** One sign-in against the shared identity. Returns a token for each portal that accepted it. */
+export async function appUnifiedLogin(input: {
+  email: string;
+  password: string;
+  phone: string;
+  simVerified?: boolean;
+}) {
+  return postJson('https://majuu.uwezo.go.ke', '/api/auth/app/unified', {
+    email: normalizeEmail(input.email),
+    password: input.password,
+    phone: input.phone,
+    simVerified: input.simVerified === true,
+  });
+}
+
 export async function appLoginOrRegister(input: {
   origin: string;
   email: string;
@@ -151,6 +166,29 @@ export async function appSignup(input: {
     phone: input.phone,
     requestId: input.requestId,
     otp: input.otp,
+  });
+}
+
+export async function requestContactConfirmation(input: { email: string; phone: string }) {
+  return postJson('https://majuu.uwezo.go.ke', '/api/auth/app/contact-otp', {
+    action: 'request',
+    email: normalizeEmail(input.email),
+    phone: input.phone,
+  });
+}
+
+export async function confirmContactCodes(input: {
+  emailRequestId: string;
+  emailCode: string;
+  phoneRequestId: string;
+  phoneCode: string;
+}) {
+  return postJson('https://majuu.uwezo.go.ke', '/api/auth/app/contact-otp', {
+    action: 'confirm',
+    emailRequestId: input.emailRequestId,
+    emailCode: input.emailCode,
+    phoneRequestId: input.phoneRequestId,
+    phoneCode: input.phoneCode,
   });
 }
 

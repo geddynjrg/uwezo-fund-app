@@ -9,7 +9,8 @@ export function normalizeKenyanPhone(raw: string): string {
   if (digits.startsWith('0') && digits.length === 10) {
     return `+254${digits.slice(1)}`;
   }
-  if (digits.length === 9 && digits.startsWith('7')) {
+  // Local 9-digit: 07… → 7XXXXXXXX or 01… → 1XXXXXXXX
+  if (digits.length === 9 && /^[17]/.test(digits)) {
     return `+254${digits}`;
   }
   if (raw.trim().startsWith('+') && digits.length >= 10) {
@@ -18,7 +19,15 @@ export function normalizeKenyanPhone(raw: string): string {
   return raw.trim();
 }
 
+/** Accept Safaricom/Airtel-style 07… and 01… mobiles (E.164 +2547 / +2541). */
 export function isLikelyKenyanMobile(raw: string): boolean {
   const n = normalizeKenyanPhone(raw).replace(/\D/g, '');
-  return n.startsWith('254') && n.length === 12 && n[3] === '7';
+  return /^254[17]\d{8}$/.test(n);
+}
+
+/** +254720501239, 254720501239, 0720501239, and 720501239 are one line. */
+export function sameKenyanLine(a: string, b: string): boolean {
+  const left = normalizeKenyanPhone(a).replace(/\D/g, '').slice(-9);
+  const right = normalizeKenyanPhone(b).replace(/\D/g, '').slice(-9);
+  return left.length === 9 && left === right;
 }

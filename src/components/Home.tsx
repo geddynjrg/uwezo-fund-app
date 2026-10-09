@@ -4,6 +4,7 @@ import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
 import type { AppSession } from '../lib/session';
 import {
+  getNativeVersion,
   installNativeUpdate,
   onUpdateProgress,
 } from '../lib/native';
@@ -12,12 +13,14 @@ type HomeProps = {
   onOpenQr: () => void;
   onOpenAccount: () => void;
   onOpenNotifications: () => void;
+  onOpenAuthenticator: () => void;
   session?: AppSession | null;
   showStaging?: boolean;
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
-const APP_VERSION = '1.1.6';
+/** Keep in sync with package.json / android versionName */
+const PACKAGE_VERSION = '1.1.10';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -33,11 +36,24 @@ export function Home({
   onOpenQr,
   onOpenAccount,
   onOpenNotifications,
+  onOpenAuthenticator,
   session = null,
   showStaging = false,
 }: HomeProps) {
   const [updateNote, setUpdateNote] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [appVersion, setAppVersion] = useState(PACKAGE_VERSION);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getNativeVersion().then((native) => {
+      if (cancelled || !native?.versionName) return;
+      setAppVersion(native.versionName);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function runUpdate(fromUser: boolean) {
     setUpdateBusy(true);
@@ -55,7 +71,7 @@ export function Home({
       if (!result.updateAvailable) {
         setUpdateNote(
           fromUser
-            ? `You already have the latest version (${result.versionName || APP_VERSION}).`
+            ? `You already have the latest version (${result.versionName || appVersion}).`
             : '',
         );
         return;
@@ -178,6 +194,13 @@ export function Home({
             </button>
           </>
         )}
+        <button type="button" className="btn-ghost" onClick={onOpenAuthenticator}>
+          Authenticator
+        </button>
+        <p className="home-chat-note">
+          Register a TOTP account for your application. Six-digit codes refresh every 30
+          seconds, the same way as Microsoft Authenticator.
+        </p>
         <button type="button" className="btn-ghost" onClick={onOpenQr}>
           Scan App QR — browser login
         </button>
@@ -197,7 +220,7 @@ export function Home({
 
       <footer className="home-footer">
         <p>Republic of Kenya · Uwezo Fund</p>
-        <p>App {APP_VERSION} · updates download and install over this app</p>
+        <p>App {appVersion} · updates download and install over this app</p>
       </footer>
     </main>
   );

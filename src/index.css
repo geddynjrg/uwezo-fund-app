@@ -1,10 +1,13 @@
 :root {
-  /* Uwezo / Kenya-inspired palette — not purple-AI chrome */
+  /* Same primary as the loans.uwezo.go.ke footer (.uwezo --color-primary). */
   --uf-black: #111111;
   --uf-ink: #1a1a1a;
   --uf-gold: #c9a227;
   --uf-gold-soft: #e8d48a;
-  --uf-green: #006b3f;
+  --uf-green: #b72a9f;
+  --uf-green-hover: #811d70;
+  --uf-green-active: #47103f;
+  --uf-green-soft: #f1d5ec;
   --uf-red: #bb0a30;
   --uf-cream: #f7f3ea;
   --uf-sand: #efe6d4;
@@ -39,7 +42,7 @@ body {
   min-height: 100dvh;
   background:
     radial-gradient(120% 80% at 10% -10%, rgba(201, 162, 39, 0.28), transparent 55%),
-    radial-gradient(90% 60% at 100% 0%, rgba(0, 107, 63, 0.14), transparent 50%),
+    radial-gradient(90% 60% at 100% 0%, rgba(183, 42, 159, 0.14), transparent 50%),
     linear-gradient(180deg, var(--uf-sand) 0%, var(--uf-cream) 45%, #f3eee3 100%);
 }
 

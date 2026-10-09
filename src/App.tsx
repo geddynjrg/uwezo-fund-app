@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { AccountAuth } from './components/AccountAuth';
+import { Authenticator } from './components/Authenticator';
 import { Home } from './components/Home';
 import { Notifications } from './components/Notifications';
 import { QrLoginScan } from './components/QrLoginScan';
@@ -22,7 +23,7 @@ import {
 } from './lib/native';
 import './App.css';
 
-type Screen = 'home' | 'qr' | 'account' | 'notifications';
+type Screen = 'home' | 'qr' | 'account' | 'notifications' | 'authenticator';
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -47,9 +48,17 @@ function App() {
       new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
     );
     for (const origin of origins) {
+      const accessToken = origin.includes('majuu')
+        ? session.majuuAccessToken ||
+          (session.origin.includes('majuu') ? session.accessToken : '')
+        : origin.includes('staging')
+          ? ''
+          : session.loansAccessToken ||
+            (session.origin.includes('loans') ? session.accessToken : '');
+      if (!accessToken) continue;
       void registerPushDevice({
         origin,
-        accessToken: session.accessToken,
+        accessToken,
         deviceToken,
         platform: 'android',
         email: session.email,
@@ -168,6 +177,14 @@ function App() {
   if (screen === 'notifications') {
     return <Notifications onBack={() => setScreen('home')} />;
   }
+  if (screen === 'authenticator') {
+    return (
+      <>
+        <Authenticator onBack={() => setScreen('home')} session={session} />
+        {toastUi}
+      </>
+    );
+  }
 
   return (
     <>
@@ -175,6 +192,7 @@ function App() {
         onOpenQr={() => setScreen('qr')}
         onOpenAccount={() => setScreen('account')}
         onOpenNotifications={() => setScreen('notifications')}
+        onOpenAuthenticator={() => setScreen('authenticator')}
         session={session}
         showStaging={showStaging}
       />

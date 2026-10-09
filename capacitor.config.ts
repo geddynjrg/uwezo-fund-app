@@ -10,10 +10,10 @@ const config: CapacitorConfig = {
   plugins: {
     StatusBar: {
       style: 'DARK',
-      backgroundColor: '#006b3f',
+      backgroundColor: '#b72a9f',
     },
     LocalNotifications: {
-      iconColor: '#006b3f',
+      iconColor: '#b72a9f',
     },
   },
 };

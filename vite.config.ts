@@ -18,7 +18,7 @@ export default defineConfig({
         short_name: 'Uwezo Fund',
         description:
           'Uwezo Fund quick links — Wezesha Majuu, loans, website, and phone OTP chat.',
-        theme_color: '#006b3f',
+        theme_color: '#b72a9f',
         background_color: '#f7f3ea',
         display: 'standalone',
         orientation: 'portrait',

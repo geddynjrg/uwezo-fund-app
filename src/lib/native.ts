@@ -34,6 +34,11 @@ type UwezoNativePlugin = {
     otp?: string;
   }): Promise<{ shown?: boolean; hasOtp?: boolean }>;
   copyText(options: { text: string }): Promise<{ copied: boolean }>;
+  readSimPhoneNumber(): Promise<{
+    online?: boolean;
+    numbers?: string[];
+    permission?: string;
+  }>;
   getVersion(): Promise<NativeVersion>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
   installUpdate(): Promise<NativeUpdateInfo>;
@@ -102,6 +107,38 @@ export async function copyOtpText(text: string) {
     return false;
   }
   return false;
+}
+
+export type SimPhoneResult = {
+  online: boolean;
+  numbers: string[];
+  permission: 'granted' | 'denied' | 'offline' | 'unavailable';
+};
+
+/** Read the Kenyan mobile number stored on the SIM. Only works while online. */
+export async function readSimPhoneNumber(): Promise<SimPhoneResult> {
+  if (!Capacitor.isNativePlatform()) {
+    return { online: navigator.onLine, numbers: [], permission: 'unavailable' };
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { online: false, numbers: [], permission: 'offline' };
+  }
+  try {
+    const result = await UwezoNative.readSimPhoneNumber();
+    const permission =
+      result.permission === 'denied'
+        ? 'denied'
+        : result.permission === 'offline' || result.online === false
+          ? 'offline'
+          : 'granted';
+    return {
+      online: result.online !== false && permission !== 'offline',
+      numbers: Array.isArray(result.numbers) ? result.numbers.map((item) => String(item)) : [],
+      permission,
+    };
+  } catch {
+    return { online: navigator.onLine, numbers: [], permission: 'denied' };
+  }
 }
 
 export async function getNativeVersion(): Promise<NativeVersion | null> {

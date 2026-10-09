@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
+import { Capacitor } from '@capacitor/core';
 import {
-  AUTH_ORIGINS,
-  appLoginOrRegister,
   appResetPassword,
-  canonicalAuthOrigin,
-  defaultAuthOrigin,
-  rememberAuthOrigin,
-  type AuthOrigin,
+  appUnifiedLogin,
+  confirmContactCodes,
+  requestContactConfirmation,
 } from '../lib/appAuth';
-import { isLikelyKenyanMobile, normalizeKenyanPhone } from '../lib/phone';
+import { readSimPhoneNumber } from '../lib/native';
+import { isLikelyKenyanMobile, normalizeKenyanPhone, sameKenyanLine } from '../lib/phone';
 import {
   clearSession,
   getActiveSession,
@@ -28,7 +27,6 @@ type AccountAuthProps = {
 
 export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
   const [mode, setMode] = useState<Mode>('menu');
-  const [origin, setOrigin] = useState<AuthOrigin>(defaultAuthOrigin());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -37,12 +35,60 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [session, setSession] = useState<AppSession | null>(null);
+  const [simNumbers, setSimNumbers] = useState<string[]>([]);
+  const [simState, setSimState] = useState<
+    'idle' | 'checking' | 'locked' | 'manual' | 'offline' | 'denied'
+  >('idle');
+  const [emailCode, setEmailCode] = useState('');
+  const [phoneCode, setPhoneCode] = useState('');
+  const [otpChallenge, setOtpChallenge] = useState<{
+    emailRequestId: string;
+    phoneRequestId: string;
+    phoneChannel: string;
+  } | null>(null);
 
   useEffect(() => {
     const existing = getActiveSession();
     setSession(existing);
     if (existing) setMode('signed_in');
   }, []);
+
+  useEffect(() => {
+    if (mode !== 'login') return;
+    void loadSimNumber();
+  }, [mode]);
+
+  async function loadSimNumber() {
+    if (!Capacitor.isNativePlatform()) {
+      setSimState('manual');
+      setSimNumbers([]);
+      return;
+    }
+    setSimState('checking');
+    setError('');
+    const result = await readSimPhoneNumber();
+    if (!result.online || result.permission === 'offline') {
+      setSimNumbers([]);
+      setSimState('offline');
+      return;
+    }
+    if (result.permission === 'denied') {
+      setSimNumbers([]);
+      setSimState('denied');
+      return;
+    }
+    const numbers = result.numbers
+      .map((item) => normalizeKenyanPhone(item))
+      .filter((item) => isLikelyKenyanMobile(item));
+    if (numbers.length > 0) {
+      setSimNumbers(numbers);
+      setPhone(numbers[0]);
+      setSimState('locked');
+      return;
+    }
+    setSimNumbers([]);
+    setSimState('manual');
+  }
 
   function applySession(next: AppSession | null) {
     setSession(next);
@@ -62,28 +108,79 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
       return;
     }
     if (!isLikelyKenyanMobile(phoneNorm)) {
-      setError('Enter a valid Kenyan mobile number such as 07XXXXXXXX.');
+      setError('Enter a valid Kenyan mobile number such as 07XXXXXXXX or 01XXXXXXXX.');
       return;
+    }
+    const simMatch = simNumbers.some((number) => sameKenyanLine(number, phoneNorm));
+    if (Capacitor.isNativePlatform()) {
+      if (navigator.onLine === false || simState === 'offline') {
+        setError('Connect to the internet so the app can verify this phone number.');
+        return;
+      }
+      if (simState === 'checking') {
+        setError('Wait for the SIM number to be read.');
+        return;
+      }
     }
     setBusy(true);
     setError('');
-    rememberAuthOrigin(canonicalAuthOrigin(origin));
     try {
-      const data = await appLoginOrRegister({
-        origin: canonicalAuthOrigin(origin),
+      if (Capacitor.isNativePlatform() && !simMatch) {
+        if (!otpChallenge) {
+          const sent = await requestContactConfirmation({
+            email: emailNorm,
+            phone: phoneNorm,
+          });
+          setOtpChallenge({
+            emailRequestId: String(sent.emailRequestId || ''),
+            phoneRequestId: String(sent.phoneRequestId || ''),
+            phoneChannel: String(sent.phoneChannel || 'sms'),
+          });
+          setEmailCode('');
+          setPhoneCode('');
+          setMessage(String(sent.message || 'Enter the email code and the phone code.'));
+          return;
+        }
+        if (emailCode.trim().length < 4 || phoneCode.trim().length < 4) {
+          setError('Enter the email confirmation code and the phone confirmation code.');
+          return;
+        }
+        await confirmContactCodes({
+          emailRequestId: otpChallenge.emailRequestId,
+          emailCode: emailCode.trim(),
+          phoneRequestId: otpChallenge.phoneRequestId,
+          phoneCode: phoneCode.trim(),
+        });
+      }
+      const data = await appUnifiedLogin({
         email: emailNorm,
         password,
         phone: phoneNorm,
-        createIfMissing: true,
+        simVerified: simMatch,
       });
+      const majuuAccessToken = String(data.majuuAccessToken || '');
+      const loansAccessToken = String(data.loansAccessToken || '');
+      const portals = Array.isArray(data.portals)
+        ? data.portals.map((item) => String(item))
+        : [];
+      const origin = majuuAccessToken
+        ? 'https://majuu.uwezo.go.ke'
+        : 'https://loans.uwezo.go.ke';
       const next: AppSession = {
         email: emailNorm,
         phone: phoneNorm,
-        accessToken: String(data.accessToken || data.access_token || ''),
-        refreshToken: String(data.refreshToken || data.refresh_token || '') || undefined,
-        origin: canonicalAuthOrigin(origin),
+        accessToken: String(data.accessToken || data.access_token || majuuAccessToken || loansAccessToken),
+        refreshToken:
+          String(data.refreshToken || data.refresh_token || data.majuuRefreshToken || data.loansRefreshToken || '') ||
+          undefined,
+        origin,
         remainSignedIn,
         verifiedAt: new Date().toISOString(),
+        majuuAccessToken: majuuAccessToken || undefined,
+        majuuRefreshToken: String(data.majuuRefreshToken || '') || undefined,
+        loansAccessToken: loansAccessToken || undefined,
+        loansRefreshToken: String(data.loansRefreshToken || '') || undefined,
+        portals,
       };
       if (!next.accessToken) throw new Error('Login succeeded but no access token returned.');
       saveSession(next);
@@ -106,7 +203,10 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     setBusy(true);
     setError('');
     try {
-      const data = await appResetPassword({ origin, email });
+      const data = await appResetPassword({
+        origin: 'https://majuu.uwezo.go.ke',
+        email,
+      });
       setMessage(
         String(
           data.message ||
@@ -163,7 +263,13 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
               {'\n'}
               Phone: {session.phone}
               {'\n'}
-              Portal: {session.origin.replace(/^https:\/\//, '')}
+              Portals:{' '}
+              {(session.portals && session.portals.length
+                ? session.portals
+                : [session.origin]
+              )
+                .map((item) => item.replace(/^https:\/\//, ''))
+                .join(', ')}
             </p>
             <div className="chat-success__actions">
               <button type="button" className="btn-ghost" onClick={signOut}>
@@ -182,29 +288,10 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
               else void onReset(e);
             }}
           >
-            <label>
-              Portal
-              <select
-                value={origin}
-                onChange={(e) => {
-                  const next = e.target.value as AuthOrigin;
-                  setOrigin(next);
-                  rememberAuthOrigin(next);
-                }}
-                disabled={busy}
-              >
-                {AUTH_ORIGINS.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
             <p className="home-chat-note">
-              Signing in to {AUTH_ORIGINS.find((o) => o.id === origin)?.label} (
-              {origin.replace(/^https:\/\//, '')}). Wezesha Majuu and Loans are separate
-              accounts. If you used eCitizen on the website and never saved a password,
-              enter a new password here — it will be saved on this portal account.
+              One email, phone, and password is checked for Wezesha Majuu and Loans. You
+              do not choose a portal. A portal is opened only when that same password is
+              already accepted there.
             </p>
             <label>
               Email
@@ -212,7 +299,10 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
                 type="email"
                 autoComplete="username"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setOtpChallenge(null);
+                }}
                 required
                 disabled={busy}
               />
@@ -231,18 +321,107 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
                 />
               </label>
             ) : null}
+            {mode !== 'reset' && simNumbers.length > 0 ? (
+              <div className="home-chat-note">
+                <div>Numbers on the SIM in this phone:</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  {simNumbers.map((number) => (
+                    <button
+                      key={number}
+                      type="button"
+                      className="btn-ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setPhone(number);
+                        setOtpChallenge(null);
+                      }}
+                    >
+                      Use {number}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {mode !== 'reset' ? (
               <label>
                 Phone (Kenya)
                 <input
                   type="tel"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    setOtpChallenge(null);
+                  }}
                   required
-                  disabled={busy}
-                  placeholder="07XXXXXXXX"
+                  disabled={busy || simState === 'checking'}
+                  placeholder="+2547XXXXXXXX, 07XXXXXXXX, or 01XXXXXXXX"
                 />
               </label>
+            ) : null}
+            {mode !== 'reset' ? (
+              <p className="home-chat-note">
+                You can type +254, 07, or 01. A number that is not on the SIM is confirmed
+                with a separate email code and a separate phone code. If SMS is unavailable,
+                the phone code is sent to the email as well.
+              </p>
+            ) : null}
+            {mode !== 'reset' && otpChallenge ? (
+              <>
+                <label>
+                  Email confirmation code
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={emailCode}
+                    onChange={(e) => setEmailCode(e.target.value)}
+                    disabled={busy}
+                    required
+                  />
+                </label>
+                <label>
+                  Phone confirmation code
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={phoneCode}
+                    onChange={(e) => setPhoneCode(e.target.value)}
+                    disabled={busy}
+                    required
+                  />
+                </label>
+                <p className="home-chat-note">
+                  {otpChallenge.phoneChannel === 'email'
+                    ? 'SMS was unavailable, so both codes were sent to the email.'
+                    : 'The email code is in the inbox. The phone code was sent by SMS.'}
+                </p>
+              </>
+            ) : null}
+            {mode !== 'reset' && simState === 'offline' ? (
+              <p className="home-chat-note">
+                Connect to the internet, then read the SIM again. The phone number is verified
+                from the SIM only while you are online.
+              </p>
+            ) : null}
+            {mode !== 'reset' && simState === 'denied' ? (
+              <p className="home-chat-note">
+                Allow phone permission so the app can read the number stored on this SIM.
+              </p>
+            ) : null}
+            {mode !== 'reset' && simState === 'manual' && Capacitor.isNativePlatform() ? (
+              <p className="home-chat-note">
+                This SIM did not provide a phone number. Enter the Kenyan number on this line.
+                It is saved on Wezesha Majuu and Loans.
+              </p>
+            ) : null}
+            {mode !== 'reset' && Capacitor.isNativePlatform() ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={busy || simState === 'checking'}
+                onClick={() => void loadSimNumber()}
+              >
+                {simState === 'checking' ? 'Reading SIM…' : 'Read number from SIM'}
+              </button>
             ) : null}
             {mode === 'login' ? (
               <label className="account-check">

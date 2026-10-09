@@ -10,6 +10,11 @@ export type AppSession = {
   origin: string;
   remainSignedIn: boolean;
   verifiedAt: string;
+  majuuAccessToken?: string;
+  majuuRefreshToken?: string;
+  loansAccessToken?: string;
+  loansRefreshToken?: string;
+  portals?: string[];
 };
 
 export type AppNotification = {

@@ -7,23 +7,43 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
-@CapacitorPlugin(name = "UwezoNative")
+@CapacitorPlugin(
+    name = "UwezoNative",
+    permissions = {
+      @Permission(
+          strings = {
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.READ_PHONE_NUMBERS
+          },
+          alias = "sim")
+    })
 public class UwezoNativePlugin extends Plugin {
 
   @PluginMethod
@@ -83,6 +103,32 @@ public class UwezoNativePlugin extends Plugin {
     JSObject ret = new JSObject();
     ret.put("copied", text != null && !text.isEmpty());
     call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void readSimPhoneNumber(PluginCall call) {
+    if (!isOnline()) {
+      call.resolve(simResult(false, new JSArray(), "offline"));
+      return;
+    }
+    if (getPermissionState("sim") != PermissionState.GRANTED) {
+      requestPermissionForAlias("sim", call, "simPermissionCallback");
+      return;
+    }
+    call.resolve(collectSimNumbers());
+  }
+
+  @PermissionCallback
+  private void simPermissionCallback(PluginCall call) {
+    if (!isOnline()) {
+      call.resolve(simResult(false, new JSArray(), "offline"));
+      return;
+    }
+    if (getPermissionState("sim") != PermissionState.GRANTED) {
+      call.resolve(simResult(true, new JSArray(), "denied"));
+      return;
+    }
+    call.resolve(collectSimNumbers());
   }
 
   @PluginMethod
@@ -186,6 +232,80 @@ public class UwezoNativePlugin extends Plugin {
     data.put("stage", stage);
     data.put("message", message);
     notifyListeners("updateProgress", data);
+  }
+
+  private boolean isOnline() {
+    try {
+      ConnectivityManager cm =
+          (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+      if (cm == null) return false;
+      Network network = cm.getActiveNetwork();
+      if (network == null) return false;
+      NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+      return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    } catch (Exception ignored) {
+      return false;
+    }
+  }
+
+  private JSObject collectSimNumbers() {
+    Set<String> found = new LinkedHashSet<>();
+    Context ctx = getContext();
+    try {
+      SubscriptionManager subscriptions =
+          (SubscriptionManager) ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+      TelephonyManager telephony =
+          (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+      if (subscriptions != null) {
+        List<SubscriptionInfo> infos = subscriptions.getActiveSubscriptionInfoList();
+        if (infos != null) {
+          for (SubscriptionInfo info : infos) {
+            int subId = info.getSubscriptionId();
+            if (Build.VERSION.SDK_INT >= 33) {
+              addKenyanNumber(found, subscriptions.getPhoneNumber(subId));
+            }
+            addKenyanNumber(found, info.getNumber());
+            if (telephony != null) {
+              addKenyanNumber(found, telephony.createForSubscriptionId(subId).getLine1Number());
+            }
+          }
+        }
+      }
+      if (telephony != null) {
+        addKenyanNumber(found, telephony.getLine1Number());
+      }
+    } catch (SecurityException ignored) {
+      return simResult(true, new JSArray(), "denied");
+    }
+    JSArray numbers = new JSArray();
+    for (String number : found) {
+      numbers.put(number);
+    }
+    return simResult(true, numbers, "granted");
+  }
+
+  private void addKenyanNumber(Set<String> found, String raw) {
+    if (raw == null) return;
+    String digits = raw.replaceAll("\\D", "");
+    if (digits.startsWith("254") && digits.length() == 12 && (digits.charAt(3) == '7' || digits.charAt(3) == '1')) {
+      found.add("+" + digits);
+      return;
+    }
+    if (digits.startsWith("0") && digits.length() == 10 && (digits.charAt(1) == '7' || digits.charAt(1) == '1')) {
+      found.add("+254" + digits.substring(1));
+      return;
+    }
+    if (digits.length() == 9 && (digits.charAt(0) == '7' || digits.charAt(0) == '1')) {
+      found.add("+254" + digits);
+    }
+  }
+
+  private JSObject simResult(boolean online, JSArray numbers, String permission) {
+    JSObject ret = new JSObject();
+    ret.put("online", online);
+    ret.put("numbers", numbers);
+    ret.put("permission", permission);
+    return ret;
   }
 
   private void requestNotifyPermission() {
