@@ -177,8 +177,13 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
     const uploaded = await submitIndividualOnline(requested);
     setPerson(uploaded.person);
     await reload();
-    setMessage(uploaded.ok ? `${uploaded.detail} This application can no longer be changed.` : `${uploaded.detail} It is still saved on this phone and can still be changed.`);
-    setError('');
+    if (uploaded.ok) {
+      setMessage(`${uploaded.detail} This application can no longer be changed.`);
+      setError('');
+    } else {
+      setMessage('');
+      setError(`${uploaded.detail} The application is still saved on this phone.`);
+    }
   }
 
   async function submitSavedGroup() {
@@ -352,8 +357,8 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
       setBusy(false);
       setMessage(
         consented.guarantors.some((guarantor) => guarantor.consentPending)
-          ? 'The guarantor confirmation SMS could not be sent. You can still submit this application. The confirmation stays pending.'
-          : 'A confirmation code was sent to each guarantor.',
+          ? 'A confirmation code could not be sent. The application can be saved on this phone, and it can be submitted online after the guarantor receives the code and you enter it.'
+          : 'A confirmation code was sent to each guarantor. Enter each code before submitting online.',
       );
     }
     if (mode === 'group' && title === 'Certificate') {
@@ -629,12 +634,16 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
                 </label>
                 <label>
                   Phone
-                  <input inputMode="tel" value={guarantor.phone} onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, phone: event.target.value, otpSent: false, consentPending: false } : row) as IndividualMajuu['guarantors'] })} />
+                  <input inputMode="tel" value={guarantor.phone} onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, phone: event.target.value, otpCode: '', otpEntered: '', otpSent: false, consentPending: false } : row) as IndividualMajuu['guarantors'] })} />
+                </label>
+                <label>
+                  Confirmation code from this guarantor
+                  <input inputMode="numeric" autoComplete="one-time-code" value={guarantor.otpEntered} onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, otpEntered: event.target.value.trim() } : row) as IndividualMajuu['guarantors'] })} />
                 </label>
                 <p className="home-chat-note">
                   {guarantor.otpSent
-                    ? 'A confirmation code was sent to this phone.'
-                    : 'Next sends a confirmation code. If it cannot be sent, you can still submit the application and the confirmation stays pending.'}
+                    ? 'The code was sent to this phone. Enter it here before the application is submitted online.'
+                    : 'Next sends the confirmation code. The application cannot be submitted online until this guarantor receives the code and you enter it.'}
                 </p>
               </fieldset>
             ))}

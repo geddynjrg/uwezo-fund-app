@@ -1,6 +1,6 @@
 {
-  "versionCode": 31,
-  "versionName": "1.1.27",
+  "versionCode": 32,
+  "versionName": "1.1.28",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "An individual application is submitted even when the guarantor confirmation SMS cannot be sent. The confirmation stays pending. The application is saved before a group application exists."
+  "notes": "A guarantor confirmation code must be received and entered before an application is submitted. Sign-in accepts the constituency mailbox or an LMS password when the LMS is online."
 }

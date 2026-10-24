@@ -36,6 +36,7 @@ export type GuarantorDraft = {
   nationalId: string;
   phone: string;
   otpCode: string;
+  otpEntered: string;
   otpSent: boolean;
   consentPending: boolean;
 };
@@ -174,6 +175,7 @@ export function emptyGuarantor(): GuarantorDraft {
     nationalId: '',
     phone: '',
     otpCode: '',
+    otpEntered: '',
     otpSent: false,
     consentPending: false,
   };
@@ -575,6 +577,19 @@ export function applyPlacement(person: IndividualMajuu, placement: { recruitment
   return next;
 }
 
+export function guarantorConfirmationError(person: IndividualMajuu): string {
+  for (let index = 0; index < person.guarantors.length; index += 1) {
+    const guarantor = person.guarantors[index];
+    if (!guarantor.otpSent || !guarantor.otpCode) {
+      return `Guarantor ${index + 1} has not received a confirmation code yet.`;
+    }
+    if ((guarantor.otpEntered || '').trim() !== guarantor.otpCode) {
+      return `Enter the confirmation code sent to guarantor ${index + 1} before submitting online.`;
+    }
+  }
+  return '';
+}
+
 export async function sendGuarantorOtps(person: IndividualMajuu): Promise<IndividualMajuu> {
   const guarantors = person.guarantors.map((guarantor) => ({ ...guarantor })) as [GuarantorDraft, GuarantorDraft];
   for (let index = 0; index < guarantors.length; index += 1) {
@@ -755,33 +770,41 @@ function syncPayload(record: MajuuRecord) {
 }
 
 async function postMajuuSync(record: MajuuRecord): Promise<{ ok: boolean; detail: string; serverId: string }> {
-  const online = await probeOrigin(LINKS.majuu.url);
-  if (!online) return { ok: false, detail: 'majuu.uwezo.go.ke did not answer. The application stays on this phone.', serverId: '' };
+  const payload = syncPayload(record);
   try {
     const response = Capacitor.isNativePlatform()
       ? await CapacitorHttp.post({
           url: MAJUU_SYNC_URL,
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          data: syncPayload(record),
+          data: payload,
           connectTimeout: 25000,
-          readTimeout: 25000,
+          readTimeout: 45000,
         })
       : await fetch(MAJUU_SYNC_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(syncPayload(record)),
-          signal: AbortSignal.timeout(25000),
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(45000),
         });
     const status = 'status' in response ? response.status : 0;
-    const data = Capacitor.isNativePlatform()
-      ? ((response as { data?: { ok?: boolean; detail?: string; serverId?: string } }).data || {})
-      : ((await (response as Response).json().catch(() => ({}))) as { ok?: boolean; detail?: string; serverId?: string });
+    const raw = Capacitor.isNativePlatform()
+      ? (response as { data?: unknown }).data
+      : await (response as Response).text();
+    let data: { ok?: boolean; detail?: string; serverId?: string } = {};
+    try {
+      data = (typeof raw === 'string' ? JSON.parse(raw || '{}') : raw || {}) as { ok?: boolean; detail?: string; serverId?: string };
+    } catch {
+      data = {};
+    }
     if (status >= 200 && status < 300 && data.ok) {
       return { ok: true, detail: data.detail || 'Submitted to majuu.uwezo.go.ke.', serverId: data.serverId || '' };
     }
-    return { ok: false, detail: data.detail || 'Majuu did not accept this application.', serverId: '' };
+    if (!status) {
+      return { ok: false, detail: 'The phone could not reach majuu.uwezo.go.ke. The application stays on this phone.', serverId: '' };
+    }
+    return { ok: false, detail: data.detail || `Majuu answered (${status}) and did not store this application.`, serverId: '' };
   } catch {
-    return { ok: false, detail: 'The application is saved on this phone and will be submitted when Majuu answers.', serverId: '' };
+    return { ok: false, detail: 'The phone could not reach majuu.uwezo.go.ke. The application stays on this phone.', serverId: '' };
   }
 }
 
@@ -811,21 +834,22 @@ export async function submitIndividualOnline(person: IndividualMajuu): Promise<{
   if (neaimsPlacementRequired() && placement.state === 'missing') {
     return { person: { ...filled, neaims: 'missing', neaimsDetail: placement.detail }, ok: false, detail: placement.detail };
   }
-  const consented = await sendGuarantorOtps(filled);
-  const confirmationPending = consented.guarantors.some((guarantor) => guarantor.consentPending);
-  const result = await postMajuuSync({ ...consented, neaims: placement.state, neaimsDetail: placement.detail });
+  let current = await sendGuarantorOtps(filled);
+  const confirmationError = guarantorConfirmationError(current);
+  if (confirmationError) {
+    await saveMajuu(current);
+    return { person: current, ok: false, detail: confirmationError };
+  }
+  const result = await postMajuuSync({ ...current, neaims: placement.state, neaimsDetail: placement.detail });
   const saved = {
-    ...consented,
+    ...current,
     neaims: placement.state,
     neaimsDetail: placement.detail,
     uploadedToMajuu: result.ok,
     serverApplicationId: result.serverId,
   };
   await saveMajuu(saved);
-  const detail = result.ok && confirmationPending
-    ? 'Submitted to majuu.uwezo.go.ke. Guarantor confirmation could not be sent yet and remains pending.'
-    : result.detail;
-  return { person: saved, ok: result.ok, detail };
+  return { person: saved, ok: result.ok, detail: result.detail };
 }
 
 export async function submitGroupOnline(group: GroupMajuu): Promise<{ group: GroupMajuu; ok: boolean; detail: string }> {

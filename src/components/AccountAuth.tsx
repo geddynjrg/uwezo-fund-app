@@ -20,7 +20,7 @@ import { stopOtpListener } from '../lib/native';
 import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
-import { syncLmsMailbox } from '../lib/lmsSync';
+import { lmsHostOnline, syncLmsMailbox } from '../lib/lmsSync';
 import { isConstituencyMailbox, signInConstituencyOfficer, standardMailboxPassword } from '../lib/zimbraAuth';
 
 type Mode = 'menu' | 'login' | 'reset' | 'signed_in';
@@ -117,34 +117,55 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
       setError('Enter the email for this portal account.');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    if (password.length < 1) {
+      setError('Enter the password.');
       return;
     }
-    if (isConstituencyMailbox(emailNorm)) {
-      setBusy(true);
-      setError('');
-      setSavedForLater(false);
-      try {
+    setBusy(true);
+    setError('');
+    setSavedForLater(false);
+    try {
+      const lmsOnline = await lmsHostOnline();
+      const lms = lmsOnline ? await syncLmsMailbox(emailNorm, password) : null;
+      if (lms?.authenticated) {
+        onOpenLms?.({
+          email: emailNorm,
+          constituency: lms.constituency || emailNorm,
+          passwordReset: false,
+          role: lms.role,
+          syncDetail: lms.detail,
+        });
+        return;
+      }
+      if (isConstituencyMailbox(emailNorm)) {
         const officer = await signInConstituencyOfficer(emailNorm, password);
         if (!officer.ok) {
-          setError(officer.message);
+          setError(lms?.detail && lmsOnline ? `${officer.message} ${lms.detail}` : officer.message);
           return;
         }
         const mailboxPassword = officer.passwordReset ? standardMailboxPassword() : password;
-        const synced = await syncLmsMailbox(officer.email, mailboxPassword);
+        const synced = lmsOnline ? await syncLmsMailbox(officer.email, mailboxPassword) : null;
         onOpenLms?.({
           email: officer.email,
-          constituency: officer.constituency,
+          constituency: synced?.constituency || officer.constituency,
           passwordReset: officer.passwordReset,
-          role: synced.role,
-          syncDetail: synced.detail,
+          role: synced?.authenticated ? synced.role : 'constituency',
+          syncDetail: synced?.authenticated
+            ? synced.detail
+            : `Signed in with the constituency mailbox. ${synced?.detail || 'lms.uwezo.go.ke did not accept this password, so the constituency menu is shown without a new download.'}`,
         });
-      } catch {
-        setError('Could not reach mail.govmail.ke. Check your connection, then try again.');
-      } finally {
-        setBusy(false);
+        return;
       }
+    } catch {
+      if (isConstituencyMailbox(emailNorm)) {
+        setError('Could not reach the constituency mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
+        return;
+      }
+    } finally {
+      setBusy(false);
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
     if (!isLikelyKenyanMobile(phoneNorm)) {

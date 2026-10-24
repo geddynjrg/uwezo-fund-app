@@ -3,6 +3,7 @@ import logo from '../assets/uwezo-fund-logo.png';
 import { LMS_PAGES, loadLmsCache, type LmsRole } from '../lib/lmsSync';
 import { probeOrigin } from '../lib/portalStatus';
 import { standardMailboxPassword } from '../lib/zimbraAuth';
+import { openExternal } from '../lib/openLink';
 
 type LmsOfficer = {
   email: string;
@@ -18,11 +19,11 @@ type LmsMobileProps = {
 };
 
 export function LmsMobile({ officer, onBack }: LmsMobileProps) {
-  const pages = LMS_PAGES[officer.role] || LMS_PAGES.constituency;
+  const cache = loadLmsCache(officer.email);
+  const pages = (cache?.menu && cache.menu.length ? cache.menu : LMS_PAGES[officer.role]) || LMS_PAGES.constituency;
   const [page, setPage] = useState(pages[0].id);
   const [menuOpen, setMenuOpen] = useState(false);
   const [lmsOnline, setLmsOnline] = useState<boolean | null>(null);
-  const cache = loadLmsCache(officer.email);
   const current = pages.find((item) => item.id === page) || pages[0];
 
   useEffect(() => {
@@ -90,9 +91,14 @@ export function LmsMobile({ officer, onBack }: LmsMobileProps) {
           {downloaded ? (
             <p>{downloaded}</p>
           ) : (
-            <p>No rows for this page are stored on this phone yet. They download when lms.uwezo.go.ke accepts the mailbox sign-in.</p>
+            <p>This is a constituency LMS page. Its rows download when lms.uwezo.go.ke or lms-staging.uwezo.go.ke accepts the sign-in.</p>
           )}
           {cache?.fetchedAt ? <p className="lms-note">Last download {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
+          {current.path && lmsOnline ? (
+            <button type="button" className="btn-primary" onClick={() => void openExternal(`${cache?.host || 'https://lms.uwezo.go.ke'}${current.path}`)}>
+              Open this page on the LMS
+            </button>
+          ) : null}
         </article>
       </section>
     </main>
