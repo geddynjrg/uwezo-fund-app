@@ -13,7 +13,7 @@ export const GROUP_PURPOSE = 'Seek Funds to facilitate travel abroad for jobs';
 export const GROUP_ACTIVITIES = 'Travelling Abroad for Work';
 export const MAJUU_LMS_URL = 'https://majuu.uwezo.go.ke/lms';
 export const INDIVIDUAL_LOAN_CAP = 166666;
-const NEAIMS_PLACEMENTS_URL = 'https://api.kazi254.ke/api/v1/integrations/jobseeker/placements';
+const NEAIMS_PLACEMENTS_URL = 'https://majuu.uwezo.go.ke/api/neaims/placements';
 const MAJUU_SYNC_URL = 'https://majuu.uwezo.go.ke/api/app/offline-sync';
 
 const DB_NAME = 'uwezo-majuu-applications';
@@ -514,7 +514,11 @@ export async function checkJobseekerPlacement(nationalId: string): Promise<{
       : await (response as Response).json().catch(() => null);
     const data = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown> | null;
     const nested = data && typeof data.data === 'object' && data.data ? (data.data as Record<string, unknown>) : null;
-    const placements = Array.isArray(nested?.placements) ? (nested.placements as Record<string, unknown>[]) : [];
+    const placements = Array.isArray(data?.placements)
+      ? (data.placements as Record<string, unknown>[])
+      : Array.isArray(nested?.placements)
+        ? (nested.placements as Record<string, unknown>[])
+        : [];
     if (status >= 200 && status < 300 && placements.length) {
       const preferred = placements[0];
       const mapped = mapPlacement(preferred);
