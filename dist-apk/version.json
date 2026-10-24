@@ -1,6 +1,6 @@
 {
-  "versionCode": 29,
-  "versionName": "1.1.25",
+  "versionCode": 30,
+  "versionName": "1.1.26",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Loan application and Wezesha Majuu open on the phone when the websites are down. The amount applied is the budget total, up to KES 166,666. Guarantor confirmation, job placement, and the Majuu upload run when the phone is online."
+  "notes": "Passport numbers use the Kenyan format. A saved application stays editable, with its loan number visible, until it is submitted to the online portal."
 }

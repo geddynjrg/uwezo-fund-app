@@ -13,6 +13,13 @@ export const GROUP_PURPOSE = 'Seek Funds to facilitate travel abroad for jobs';
 export const GROUP_ACTIVITIES = 'Travelling Abroad for Work';
 export const MAJUU_LMS_URL = 'https://majuu.uwezo.go.ke/lms';
 export const INDIVIDUAL_LOAN_CAP = 166666;
+/** Ordinary Kenyan passport (A1234567) and ePassport (AK1234567). */
+export const KENYAN_PASSPORT = /^[A-Z]{1,2}\d{7}$/;
+export const AGENT_NUMBER = /^[A-Z0-9][A-Z0-9\-/]*$/;
+
+export function isKenyanPassport(value: string): boolean {
+  return KENYAN_PASSPORT.test(value.trim().toUpperCase());
+}
 const NEAIMS_PLACEMENTS_URL = 'https://majuu.uwezo.go.ke/api/neaims/placements';
 const MAJUU_SYNC_URL = 'https://majuu.uwezo.go.ke/api/app/offline-sync';
 
@@ -108,6 +115,7 @@ export type IndividualMajuu = {
   recruitmentLocked: string[];
   tripartiteAccepted: boolean;
   uploadedToMajuu: boolean;
+  submitRequested: boolean;
   serverApplicationId: string;
   passportFile: PassportFile | null;
   loanNumber: string;
@@ -149,6 +157,7 @@ export type GroupMajuu = {
   status: 'draft' | 'complete';
   lastError: string;
   uploadedToMajuu: boolean;
+  submitRequested: boolean;
   serverApplicationId: string;
   notices: PendingNotice[];
 };
@@ -240,6 +249,7 @@ export function emptyIndividual(): IndividualMajuu {
     recruitmentLocked: [],
     tripartiteAccepted: false,
     uploadedToMajuu: false,
+    submitRequested: false,
     serverApplicationId: '',
     passportFile: null,
     loanNumber: '',
@@ -277,6 +287,7 @@ export function emptyGroup(): GroupMajuu {
     status: 'draft',
     lastError: '',
     uploadedToMajuu: false,
+    submitRequested: false,
     serverApplicationId: '',
     notices: [],
   };
@@ -428,6 +439,7 @@ export type PlacementPatch = Partial<
     | 'workDuration'
     | 'currency'
     | 'monthlyRemuneration'
+    | 'passportNo'
   >
 >;
 
@@ -442,6 +454,7 @@ const PLACEMENT_FIELDS = [
   'workDuration',
   'currency',
   'monthlyRemuneration',
+  'passportNo',
 ] as const;
 
 function textOf(value: unknown): string {
@@ -453,12 +466,13 @@ function mapPlacement(raw: Record<string, unknown>): { values: PlacementPatch; l
   const values: PlacementPatch = {};
   const locked: string[] = [];
   const take = (field: keyof PlacementPatch, value: unknown) => {
-    const text = textOf(value);
+    const text = field === 'passportNo' || field === 'agentNumber' ? textOf(value).toUpperCase() : textOf(value);
     if (!text) return;
     values[field] = text as never;
     locked.push(field);
   };
   take('agentNumber', raw.agentNumber);
+  take('passportNo', textOf(raw.passportNo) || textOf(raw.passportNumber) || textOf(raw.passport));
   take('localAgentName', raw.agencyName);
   take('employerAbroad', raw.employerAbroad);
   take('recruiterCode', raw.employerCode);
@@ -611,7 +625,13 @@ export function validateIndividual(draft: IndividualMajuu, atSubmit: boolean): s
   if (!/^\d{6,9}$/.test(draft.nationalId.trim())) errors.push('National ID is required.');
   if (draft.name.trim().length < 2) errors.push('Name is required.');
   if (!draft.gender) errors.push('Gender is required.');
-  if (!draft.passportNo.trim()) errors.push('Passport number is required.');
+  const passport = draft.passportNo.trim().toUpperCase();
+  if (!passport) errors.push('Passport number is required.');
+  else if (!draft.recruitmentLocked.includes('passportNo') && !isKenyanPassport(passport)) {
+    errors.push('Enter a Kenyan passport number: one or two capital letters followed by 7 digits, such as A1234567 or AK1234567.');
+  }
+  const agent = draft.agentNumber.trim().toUpperCase();
+  if (agent && !AGENT_NUMBER.test(agent)) errors.push('Agent number must be capital letters and numbers.');
   if (!draft.educationLevel.trim()) errors.push('Education level is required.');
   if (!isLikelyKenyanMobile(draft.phone)) errors.push('A Kenyan mobile number is required.');
   if (!draft.email.includes('@')) errors.push('Email is required.');
@@ -826,10 +846,10 @@ export async function flushMajuuUploads(): Promise<void> {
   if (!online) return;
   const rows = await listMajuu();
   for (const row of rows) {
-    if (row.kind === 'individual' && row.status !== 'draft' && !row.uploadedToMajuu) {
+    if (row.kind === 'individual' && row.submitRequested && !row.uploadedToMajuu) {
       await submitIndividualOnline(row);
     }
-    if (row.kind === 'group' && row.status === 'complete' && !row.uploadedToMajuu) {
+    if (row.kind === 'group' && row.submitRequested && row.status === 'complete' && !row.uploadedToMajuu) {
       await submitGroupOnline(row);
     }
   }

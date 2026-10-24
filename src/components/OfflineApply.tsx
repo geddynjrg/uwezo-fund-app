@@ -34,6 +34,7 @@ import { loadPendingLogin } from '../lib/pendingLogin';
 import { probeOrigin } from '../lib/portalStatus';
 import { searchAgencies, type AgencyHit } from '../lib/registries';
 import { getActiveSession } from '../lib/session';
+import { MajuuApplicationList } from './MajuuApply';
 
 type OfflineApplyProps = {
   portal: PortalId;
@@ -367,6 +368,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
           You can complete this without signing in. Sign-in is tried when {link.url.replace(/^https:\/\//, '')} answers.
           The application number uses the same form as an online application.
         </p>
+        <MajuuApplicationList />
         {message ? <div className="bubble bubble--bot">{message}</div> : null}
         {error ? <div className="bubble bubble--system">{error}</div> : null}
         {registryNote ? <div className="bubble bubble--bot">{registryNote}</div> : null}

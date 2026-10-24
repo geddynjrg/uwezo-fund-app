@@ -6,6 +6,7 @@ import { inferGender } from '../lib/genderFromName';
 import { constituencyChoices, countyChoices, wardChoices } from '../lib/locations';
 import { isMseaChairPartner, isMseaOfficialPartner, lookupMsea, partnerByNationalId } from '../lib/msea';
 import {
+  AGENT_NUMBER,
   GROUP_ACTIVITIES,
   GROUP_PURPOSE,
   INDIVIDUAL_LOAN_CAP,
@@ -19,6 +20,7 @@ import {
   emptyIndividual,
   genderTotals,
   individualAcknowledgement,
+  isKenyanPassport,
   individualsFor,
   listMajuu,
   newLoanNumber,
@@ -53,7 +55,7 @@ const INDIVIDUAL_STEPS = [
 
 const GROUP_STEPS = ['Certificate', 'Males and females', 'Members received', 'Group Information', 'Group bank account', 'Loan number'];
 
-type Mode = 'choose' | 'individual' | 'group';
+type Mode = 'choose' | 'individual' | 'group' | 'record' | 'group-record';
 
 export function MajuuApply({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<Mode>('choose');
@@ -61,14 +63,21 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
   const [person, setPerson] = useState<IndividualMajuu>(emptyIndividual());
   const [group, setGroup] = useState<GroupMajuu>(emptyGroup());
   const [saved, setSaved] = useState<IndividualMajuu[]>([]);
+  const [groups, setGroups] = useState<GroupMajuu[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [branches, setBranches] = useState<BankBranches>({});
   const [groupReady, setGroupReady] = useState(false);
 
+  async function reload() {
+    const rows = await listMajuu();
+    setSaved(rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft'));
+    setGroups(rows.filter((row): row is GroupMajuu => row.kind === 'group' && (row.status === 'complete' || Boolean(row.loanNumber) || Boolean(row.registrationNumber.trim()))));
+  }
+
   useEffect(() => {
-    void listMajuu().then((rows) => setSaved(rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft')));
+    void reload();
     void loadGroupBankBranches().then(setBranches).catch(() => setBranches({}));
   }, []);
 
@@ -123,6 +132,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
   }
 
   async function savePerson(current: IndividualMajuu) {
+    if (current.uploadedToMajuu) return;
     const checked = await refreshChecks(withBudgetAmount({ ...current, accountName: current.accountName || current.name, signed: Boolean(current.signatureImage) }), true);
     const errors = validateIndividual(checked, true);
     if (errors.length) {
@@ -130,26 +140,61 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
       setError(errors[0]);
       return;
     }
-    const stored = { ...checked, status: 'saved' as const };
+    const loanNumber = checked.loanNumber || newLoanNumber();
+    const stored: IndividualMajuu = {
+      ...checked,
+      passportNo: checked.passportNo.trim().toUpperCase(),
+      agentNumber: checked.agentNumber.trim().toUpperCase(),
+      status: 'saved',
+      loanNumber,
+      individualNumber: checked.individualNumber || individualAcknowledgement(loanNumber, checked.nationalId),
+      submitRequested: false,
+      uploadedToMajuu: false,
+    };
     await saveMajuu(stored);
-    const uploaded = await submitIndividualOnline(stored);
-    const noted = await queueMajuuNotice(uploaded.person, {
-      name: uploaded.person.name,
-      phone: uploaded.person.phone,
+    await queueMajuuNotice(stored, {
+      name: stored.name,
+      phone: stored.phone,
       title: 'Wezesha Majuu individual application',
-      body: uploaded.ok
-        ? `Dear ${uploaded.person.name}, your individual application for ${uploaded.person.groupName || uploaded.person.registrationNumber} was submitted to majuu.uwezo.go.ke.`
-        : `Dear ${uploaded.person.name}, your individual application for ${uploaded.person.groupName || uploaded.person.registrationNumber} is saved on this phone and will be submitted when Majuu answers.`,
+      body: `Dear ${stored.name}, your individual application ${stored.individualNumber} is saved on this phone and is waiting to be submitted to majuu.uwezo.go.ke.`,
     });
-    setPerson(noted);
-    setSaved(await listMajuu().then((rows) => rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft')));
-    setMessage(uploaded.ok ? uploaded.detail : `${uploaded.detail} The application remains on this phone.`);
+    setPerson(stored);
+    await reload();
+    setMode('record');
+    setMessage('Saved on this phone. It is waiting to be submitted to the online portal. You can still change any step.');
+    setError('');
+  }
+
+  async function submitSavedPerson() {
+    if (person.uploadedToMajuu) return;
+    const errors = validateIndividual(person, true);
+    if (errors.length) {
+      setError(errors[0]);
+      return;
+    }
+    const requested = { ...person, submitRequested: true };
+    await saveMajuu(requested);
+    const uploaded = await submitIndividualOnline(requested);
+    setPerson(uploaded.person);
+    await reload();
+    setMessage(uploaded.ok ? 'Submitted to majuu.uwezo.go.ke. This application can no longer be changed.' : `${uploaded.detail} It is still saved on this phone and can still be changed.`);
+    setError('');
+  }
+
+  async function submitSavedGroup() {
+    if (group.uploadedToMajuu) return;
+    const requested = { ...group, submitRequested: true };
+    await saveMajuu(requested);
+    const uploaded = await submitGroupOnline(requested);
+    setGroup(uploaded.group);
+    await reload();
+    setMessage(uploaded.ok ? 'Submitted to majuu.uwezo.go.ke. This group loan can no longer be changed.' : `${uploaded.detail} It is still saved on this phone and can still be changed.`);
     setError('');
   }
 
   async function completeGroup(event: FormEvent) {
     event.preventDefault();
-    if (group.status === 'complete' && group.loanNumber) return;
+    if (group.uploadedToMajuu) return;
     setBusy(true);
     setError('');
     try {
@@ -175,40 +220,34 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
         setError(errors[0]);
         return;
       }
-      const loanNumber = newLoanNumber();
-      const completed: GroupMajuu = { ...ready, loanNumber, status: 'complete', lastError: '' };
+      const loanNumber = ready.loanNumber || newLoanNumber();
+      const completed: GroupMajuu = { ...ready, loanNumber, status: 'complete', lastError: '', submitRequested: false, uploadedToMajuu: false };
       await saveMajuu(completed);
-      const uploaded = await submitGroupOnline(completed);
-      if (!uploaded.ok) setMessage(uploaded.detail);
       for (const member of members) {
         const numbered: IndividualMajuu = {
           ...member,
           loanNumber,
           individualNumber: individualAcknowledgement(loanNumber, member.nationalId),
-          status: 'numbered',
+          status: member.uploadedToMajuu ? member.status : 'numbered',
         };
         await saveMajuu(numbered);
-        await submitIndividualOnline(numbered);
         await queueMajuuNotice(numbered, {
           name: member.name,
           phone: member.phone,
           title: 'Wezesha Majuu loan number',
-          body: `Dear ${member.name}, ${completed.officialName || 'A group official'} completed the group loan for ${completed.groupName}. Your loan number is ${numbered.individualNumber}.`,
+          body: `Dear ${member.name}, ${completed.officialName || 'A group official'} saved the group loan for ${completed.groupName}. Your loan number is ${numbered.individualNumber}. It is waiting to be submitted online.`,
         });
       }
       await queueMajuuNotice(completed, {
         name: completed.officialName,
         phone: completed.officialPhone,
         title: 'Wezesha Majuu group loan',
-        body: `The group loan for ${completed.groupName} is complete. Loan number ${loanNumber}.`,
+        body: `The group loan for ${completed.groupName} is saved on this phone. Loan number ${loanNumber}. It is waiting to be submitted online.`,
       });
-      setGroup(uploaded.group);
-      setSaved(await listMajuu().then((rows) => rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft')));
-      setMessage(
-        uploaded.ok
-          ? `Loan number ${loanNumber} is assigned and the group was submitted to majuu.uwezo.go.ke.`
-          : `Loan number ${loanNumber} is saved on this phone. ${uploaded.detail}`,
-      );
+      setGroup(completed);
+      await reload();
+      setMode('group-record');
+      setMessage(`Loan number ${loanNumber} is saved on this phone and is waiting to be submitted to the online portal.`);
     } finally {
       setBusy(false);
     }
@@ -283,6 +322,22 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
         return;
       }
     }
+    if (mode === 'individual' && title === 'Individual Information') {
+      const passport = person.passportNo.trim().toUpperCase();
+      if (!person.recruitmentLocked.includes('passportNo') && !isKenyanPassport(passport)) {
+        setError('Enter a Kenyan passport number: one or two capital letters followed by 7 digits, such as A1234567 or AK1234567.');
+        return;
+      }
+      setPerson({ ...person, passportNo: passport });
+    }
+    if (mode === 'individual' && title === 'Recruitment Details') {
+      const agentNumber = person.agentNumber.trim().toUpperCase();
+      if (!AGENT_NUMBER.test(agentNumber)) {
+        setError('Agent number must be capital letters and numbers.');
+        return;
+      }
+      setPerson({ ...person, agentNumber });
+    }
     if (mode === 'individual' && title === 'Budget Breakdown') {
       const applied = budgetTotal(person.budget);
       if (applied < 1 || applied > INDIVIDUAL_LOAN_CAP) {
@@ -337,7 +392,15 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
         <img src={logo} alt="" className="chat-header__logo" width={36} height={36} />
         <div className="chat-header__text">
           <strong>Wezesha Majuu</strong>
-          <span>{mode === 'choose' ? 'Individual, then group loan' : `Step ${step + 1} of ${steps.length}: ${title}`}</span>
+          <span>
+            {mode === 'choose'
+              ? 'Individual, then group loan'
+              : mode === 'record' || mode === 'group-record'
+                ? (mode === 'record' ? person.uploadedToMajuu : group.uploadedToMajuu)
+                  ? 'Submitted online'
+                  : 'Saved, awaiting submission'
+                : `Step ${step + 1} of ${steps.length}: ${title}`}
+          </span>
         </div>
       </header>
       <form
@@ -354,8 +417,24 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
           <div className="account-form">
             <p className="home-chat-note">
               A member completes an individual application first. Any group official can then file the group loan for
-              the members already saved. The loan number is issued only when that group loan is finished.
+              the members already saved. Each saved application keeps its loan number here, before and after it is submitted online.
             </p>
+            <ApplicationList
+              people={saved}
+              groups={groups}
+              onOpenPerson={(row) => {
+                setPerson(row);
+                setMode('record');
+                setMessage('');
+                setError('');
+              }}
+              onOpenGroup={(row) => {
+                setGroup(row);
+                setMode('group-record');
+                setMessage('');
+                setError('');
+              }}
+            />
             <button type="button" className="btn-primary" onClick={() => { setMode('individual'); setStep(0); setPerson(emptyIndividual()); }}>
               Individual application
             </button>
@@ -434,7 +513,11 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
             </label>
             <label>
               Passport number
-              <input value={person.passportNo} onChange={(event) => setPerson({ ...person, passportNo: event.target.value })} />
+              <input
+                value={person.passportNo}
+                readOnly={person.recruitmentLocked.includes('passportNo') || person.uploadedToMajuu}
+                onChange={(event) => setPerson({ ...person, passportNo: event.target.value.toUpperCase() })}
+              />
             </label>
             <label>
               KRA PIN
@@ -561,7 +644,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
         {mode === 'individual' && title === 'Recruitment Details' ? (
           <div className="account-form">
             <p className="home-chat-note">{person.neaimsDetail || 'If the job placement service answers, matching fields are filled from it.'}</p>
-            <label>Agent number<input value={person.agentNumber} readOnly={person.recruitmentLocked.includes('agentNumber')} onChange={(event) => setPerson({ ...person, agentNumber: event.target.value })} /></label>
+            <label>Agent number<input value={person.agentNumber} readOnly={person.recruitmentLocked.includes('agentNumber') || person.uploadedToMajuu} onChange={(event) => setPerson({ ...person, agentNumber: event.target.value.toUpperCase() })} /></label>
             <label>Local agent name<input value={person.localAgentName} readOnly={person.recruitmentLocked.includes('localAgentName')} onChange={(event) => setPerson({ ...person, localAgentName: event.target.value })} /></label>
             <label>Employer abroad<input value={person.employerAbroad} readOnly={person.recruitmentLocked.includes('employerAbroad')} onChange={(event) => setPerson({ ...person, employerAbroad: event.target.value })} /></label>
             <label>Employer code<input value={person.recruiterCode} readOnly={person.recruitmentLocked.includes('recruiterCode')} onChange={(event) => setPerson({ ...person, recruiterCode: event.target.value })} /></label>
@@ -655,10 +738,8 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
         {mode === 'individual' && title === 'Signature and terms' ? (
           <div className="account-form">
             <h2>Loan terms and repayment commitment</h2>
-            <p>
-              The amount applied is the total of the budget items, KES {budgetTotal(person.budget).toLocaleString('en-KE')}, and it cannot exceed KES {INDIVIDUAL_LOAN_CAP.toLocaleString('en-KE')}.
-              The loan is for travel abroad for work. The applicant and the two guarantors commit to repay this loan under the Uwezo Fund Wezesha Majuu terms.
-            </p>
+            <p className="home-chat-note">Amount applied: KES {budgetTotal(person.budget).toLocaleString('en-KE')}.</p>
+            <LoanTerms groupName={person.groupName} />
             <label className="account-check">
               <input type="checkbox" checked={person.termsAccepted} onChange={(event) => setPerson({ ...person, termsAccepted: event.target.checked })} />
               I agree to these loan terms and the repayment commitment
@@ -678,10 +759,10 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
               <input type="checkbox" checked={person.tripartiteAccepted} onChange={(event) => setPerson({ ...person, tripartiteAccepted: event.target.checked })} />
               I accept the tripartite agreement
             </label>
-            <button type="button" className="btn-primary" disabled={busy} onClick={() => { setBusy(true); void savePerson(person).finally(() => setBusy(false)); }}>
-              {busy ? 'Saving…' : 'Save individual application'}
+            <button type="button" className="btn-primary" disabled={busy || person.uploadedToMajuu} onClick={() => { setBusy(true); void savePerson(person).finally(() => setBusy(false)); }}>
+              {busy ? 'Saving…' : person.uploadedToMajuu ? 'Submitted online' : 'Save individual application'}
             </button>
-            {person.loanNumber ? <p className="home-chat-note">Loan number {person.individualNumber}</p> : <p className="home-chat-note">No loan number yet. It is issued when a group official finishes the group loan.</p>}
+            {person.individualNumber ? <p className="home-chat-note">Loan application number {person.individualNumber}</p> : <p className="home-chat-note">A loan application number is issued when you save.</p>}
           </div>
         ) : null}
 
@@ -763,16 +844,76 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
 
         {mode === 'group' && title === 'Loan number' ? (
           <div className="account-form">
-            <p className="home-chat-note">The loan number is assigned when you finish this group loan. Members are told by the app and by SMS when Majuu and the LMS are both online.</p>
-            <button type="submit" className="btn-primary" disabled={busy || Boolean(group.loanNumber)}>{busy ? 'Saving…' : 'Finish group loan'}</button>
+            <p className="home-chat-note">Saving assigns the loan number and keeps the group on this phone until you submit it to the online portal.</p>
+            <button type="submit" className="btn-primary" disabled={busy || group.uploadedToMajuu}>{busy ? 'Saving…' : group.loanNumber ? 'Save group application' : 'Finish group loan'}</button>
             {group.loanNumber ? <p>Loan number {group.loanNumber}</p> : null}
           </div>
         ) : null}
 
-        {mode !== 'choose' ? (
+        {mode === 'record' ? (
+          <>
+          <SavedRecord
+            title={person.name || 'Individual application'}
+            number={person.individualNumber || person.loanNumber}
+            uploaded={person.uploadedToMajuu}
+            busy={busy}
+            steps={INDIVIDUAL_STEPS}
+            onEdit={person.uploadedToMajuu ? undefined : (index) => {
+              setStep(index);
+              setMode('individual');
+              setMessage('');
+              setError('');
+            }}
+            onSubmit={() => {
+              setBusy(true);
+              void submitSavedPerson().finally(() => setBusy(false));
+            }}
+          />
+          <button type="button" className="btn-ghost" onClick={() => { setMode('choose'); setMessage(''); setError(''); }}>All applications</button>
+          </>
+        ) : null}
+
+        {mode === 'group-record' ? (
+          <>
+          <SavedRecord
+            title={group.groupName || group.registrationNumber || 'Group application'}
+            number={group.loanNumber}
+            uploaded={group.uploadedToMajuu}
+            busy={busy}
+            steps={GROUP_STEPS}
+            onEdit={group.uploadedToMajuu ? undefined : (index) => {
+              setStep(index);
+              setMode('group');
+              setMessage('');
+              setError('');
+            }}
+            onSubmit={() => {
+              setBusy(true);
+              void submitSavedGroup().finally(() => setBusy(false));
+            }}
+          />
+          <button type="button" className="btn-ghost" onClick={() => { setMode('choose'); setMessage(''); setError(''); }}>All applications</button>
+          </>
+        ) : null}
+
+        {mode === 'individual' || mode === 'group' ? (
           <div className="doc-actions">
-            {step > 0 ? <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button> : <button type="button" className="btn-ghost" onClick={() => setMode('choose')}>Choose again</button>}
-            {step < steps.length - 1 ? <button type="button" className="btn-primary" onClick={next}>Next</button> : null}
+            {step > 0 ? <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>Back</button> : (
+              <button type="button" className="btn-ghost" onClick={() => setMode(mode === 'group' ? (group.status === 'complete' ? 'group-record' : 'choose') : person.status === 'draft' ? 'choose' : 'record')}>
+                {mode === 'group' ? (group.status === 'complete' ? 'Saved application' : 'Choose again') : person.status === 'draft' ? 'Choose again' : 'Saved application'}
+              </button>
+            )}
+            {mode === 'individual' && person.status !== 'draft' && step > 0 ? (
+              <button type="button" className="btn-ghost" onClick={() => { void saveMajuu({ ...person, passportNo: person.passportNo.toUpperCase(), agentNumber: person.agentNumber.toUpperCase(), submitRequested: false }).then(() => { setMode('record'); void reload(); }); }}>
+                Saved application
+              </button>
+            ) : null}
+            {mode === 'group' && group.status === 'complete' && step > 0 ? (
+              <button type="button" className="btn-ghost" onClick={() => { void saveMajuu(group).then(() => { setMode('group-record'); void reload(); }); }}>
+                Saved application
+              </button>
+            ) : null}
+            {step < steps.length - 1 && !(mode === 'individual' && person.uploadedToMajuu) && !(mode === 'group' && group.uploadedToMajuu) ? <button type="button" className="btn-primary" onClick={next}>Next</button> : null}
           </div>
         ) : null}
       </form>
@@ -855,31 +996,180 @@ function readPassport(file: File, person: IndividualMajuu, onChange: (next: Indi
 function PassportCapture({ person, onChange }: { person: IndividualMajuu; onChange: (next: IndividualMajuu) => void }) {
   return (
     <div className="account-form">
-      <p className="home-chat-note">Take a photo of the passport biodata page, or upload a photo or PDF.</p>
-      <label className="btn-ghost">
-        Open camera
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
-            if (file) readPassport(file, person, onChange);
-          }}
-        />
-      </label>
-      <label className="btn-ghost">
-        Upload a photo or PDF
-        <input
-          type="file"
-          accept="image/*,application/pdf,.pdf"
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
-            if (file) readPassport(file, person, onChange);
-          }}
-        />
-      </label>
-      {person.passportFile ? <span className="home-chat-note">{person.passportFile.name}</span> : null}
+      <p className="home-chat-note">Passport biodata page. Use the camera or upload a photo or PDF.</p>
+      <div className="capture-box">
+        <span>{person.passportFile?.name || 'No file yet'}</span>
+        <div className="capture-box__actions">
+          <label title="Take a photo" aria-label="Take a photo">
+            <CameraIcon />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              disabled={person.uploadedToMajuu}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const file = event.target.files?.[0];
+                if (file) readPassport(file, person, onChange);
+              }}
+            />
+          </label>
+          <label title="Upload a file" aria-label="Upload a file">
+            <UploadIcon />
+            <input
+              type="file"
+              accept="image/*,application/pdf,.pdf"
+              disabled={person.uploadedToMajuu}
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                const file = event.target.files?.[0];
+                if (file) readPassport(file, person, onChange);
+              }}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path fill="currentColor" d="M9 4l1.5 2h3L15 4h3a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h3zm3 5a4 4 0 100 8 4 4 0 000-8z" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path fill="currentColor" d="M12 3l4 4h-3v6h-2V7H8l4-4zm-7 14h14v2H5v-2z" />
+    </svg>
+  );
+}
+
+function LoanTerms({ groupName }: { groupName: string }) {
+  const group = groupName || 'group';
+  return (
+    <>
+      <h3>Loan terms</h3>
+      <ul>
+        <li>We confirm we are members of this group.</li>
+        <li>Declare that the information provided herein is true to the best of our knowledge. We further authorize Uwezo Fund to verify the information given herein and make reference provided here in.</li>
+        <li>We agree that we are jointly and severally liable for repayment of loan in event of default.</li>
+        <li>We shall not be eligible for additional loans unless the amount in default has been cleared in full.</li>
+      </ul>
+      <h3>Repayment commitment</h3>
+      <p>We the undersigned hereby:</p>
+      <ol>
+        <li>(i) Confirm that we are members of the {group} group.</li>
+        <li>(ii) Declare that the information provided herein is true to the best of our knowledge.</li>
+        <li>(iii) We further authorize Uwezo Fund to verify the information and reference provided here-in.</li>
+        <li>(iv) We agree that jointly and severally we are liable for repayment of the loan.</li>
+        <li>(v) In the event of default, we shall be subjected to the terms and conditions of this loan.</li>
+        <li>(vi) We shall not be eligible for additional loans until the amount in default has been cleared in full.</li>
+      </ol>
+    </>
+  );
+}
+
+export function MajuuApplicationList() {
+  const [people, setPeople] = useState<IndividualMajuu[]>([]);
+  const [groups, setGroups] = useState<GroupMajuu[]>([]);
+  useEffect(() => {
+    void listMajuu().then((rows) => {
+      setPeople(rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft'));
+      setGroups(rows.filter((row): row is GroupMajuu => row.kind === 'group' && (row.status === 'complete' || Boolean(row.loanNumber))));
+    });
+  }, []);
+  return <ApplicationList people={people} groups={groups} />;
+}
+
+function ApplicationList({
+  people,
+  groups,
+  onOpenPerson,
+  onOpenGroup,
+}: {
+  people: IndividualMajuu[];
+  groups: GroupMajuu[];
+  onOpenPerson?: (row: IndividualMajuu) => void;
+  onOpenGroup?: (row: GroupMajuu) => void;
+}) {
+  if (!people.length && !groups.length) {
+    return <p className="home-chat-note">No group or individual applications are saved on this phone yet.</p>;
+  }
+  return (
+    <div className="account-form">
+      <h2>Applications on this phone</h2>
+      {people.map((row) => {
+        const body = (
+          <>
+            <strong>Individual · {row.name || row.nationalId || 'Applicant'}</strong>
+            <span>Loan application number {row.individualNumber || row.loanNumber || 'Pending'}</span>
+            <span>{row.uploadedToMajuu ? 'Submitted online' : 'Saved, awaiting submission'}</span>
+          </>
+        );
+        return onOpenPerson ? (
+          <button key={row.id} type="button" className="application-card" onClick={() => onOpenPerson(row)}>{body}</button>
+        ) : (
+          <div key={row.id} className="application-card">{body}</div>
+        );
+      })}
+      {groups.map((row) => {
+        const body = (
+          <>
+            <strong>Group · {row.groupName || row.registrationNumber || 'Group'}</strong>
+            <span>Loan application number {row.loanNumber || 'Pending'}</span>
+            <span>{row.uploadedToMajuu ? 'Submitted online' : 'Saved, awaiting submission'}</span>
+          </>
+        );
+        return onOpenGroup ? (
+          <button key={row.id} type="button" className="application-card" onClick={() => onOpenGroup(row)}>{body}</button>
+        ) : (
+          <div key={row.id} className="application-card">{body}</div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SavedRecord({
+  title,
+  number,
+  uploaded,
+  busy,
+  steps,
+  onEdit,
+  onSubmit,
+}: {
+  title: string;
+  number: string;
+  uploaded: boolean;
+  busy: boolean;
+  steps: string[];
+  onEdit?: (index: number) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="account-form">
+      <h2>{uploaded ? 'Submitted online' : 'Saved, awaiting submission'}</h2>
+      <p>{title}</p>
+      <p className="home-chat-note">Loan application number {number || 'Pending'}</p>
+      <p className="home-chat-note">
+        {uploaded
+          ? 'This application has been submitted to the online portal. No further changes can be made.'
+          : 'This application is saved on this phone and is waiting to be submitted to the online portal. You can still open any step and change it.'}
+      </p>
+      {onEdit ? steps.map((label, index) => (
+        <button key={label} type="button" className="btn-ghost" onClick={() => onEdit(index)}>
+          Edit {label}
+        </button>
+      )) : null}
+      {uploaded ? null : (
+        <button type="button" className="btn-primary" disabled={busy} onClick={onSubmit}>
+          {busy ? 'Submitting…' : 'Submit to the online portal'}
+        </button>
+      )}
     </div>
   );
 }
