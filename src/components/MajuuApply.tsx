@@ -898,6 +898,7 @@ function SignaturePad({ value, onChange }: { value: string; onChange: (dataUrl: 
   }
 
   function finish() {
+    if (!drawing.current) return;
     drawing.current = false;
     const canvas = canvasRef.current;
     if (canvas) onChange(canvas.toDataURL('image/png'));
