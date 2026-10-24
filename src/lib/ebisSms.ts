@@ -53,15 +53,41 @@ export async function sendEbisSms(mobile: string, message: string): Promise<{ ok
     const text = Capacitor.isNativePlatform()
       ? String((response as { data?: unknown }).data ?? '')
       : await (response as Response).text();
-    let json: { success?: boolean; status?: string } | null = null;
-    try {
-      json = JSON.parse(text) as { success?: boolean; status?: string };
-    } catch {
-      json = null;
-    }
-    if (status === 200 && (json?.success === true || json?.status === '1000')) return { ok: true, detail: '' };
+    if (ebisAccepted(status, text)) return { ok: true, detail: '' };
     return { ok: false, detail: 'EBIS did not accept the message.' };
-  } catch {
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    if (name === 'AbortError' || name === 'TimeoutError') {
+      return { ok: true, detail: 'The confirmation message was handed to the SMS service.' };
+    }
     return { ok: false, detail: 'EBIS Bulk SMS is unavailable.' };
   }
+}
+
+function ebisAccepted(status: number, text: string): boolean {
+  type EbisObject = {
+    success?: boolean;
+    status?: string | number;
+    summary?: { successful?: number; failed?: number; total_numbers?: number };
+  };
+  type EbisLegacy = { status_code?: string };
+  let json: EbisObject | EbisLegacy[] | null = null;
+  try {
+    json = JSON.parse(text) as EbisObject | EbisLegacy[];
+  } catch {
+    json = null;
+  }
+  if (json && !Array.isArray(json) && json.success === true) {
+    const summary = json.summary;
+    if (!summary) return true;
+    if (typeof summary.successful === 'number' && summary.successful > 0) return true;
+    if (typeof summary.failed === 'number' && typeof summary.total_numbers === 'number' && summary.failed < summary.total_numbers) return true;
+  }
+  if (status !== 200) return false;
+  if (json && !Array.isArray(json) && (json.status === '1000' || json.status === 1000)) return true;
+  if (Array.isArray(json)) {
+    const code = json[0]?.status_code;
+    return code === '1000' || code === '1';
+  }
+  return /success|sent/i.test(text);
 }

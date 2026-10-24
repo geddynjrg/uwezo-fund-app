@@ -812,14 +812,7 @@ export async function submitIndividualOnline(person: IndividualMajuu): Promise<{
     return { person: { ...filled, neaims: 'missing', neaimsDetail: placement.detail }, ok: false, detail: placement.detail };
   }
   const consented = await sendGuarantorOtps(filled);
-  if (consented.guarantors.some((guarantor) => guarantor.consentPending)) {
-    await saveMajuu(consented);
-    return {
-      person: consented,
-      ok: false,
-      detail: 'Guarantor confirmation could not be sent. It will be requested when you submit this application online.',
-    };
-  }
+  const confirmationPending = consented.guarantors.some((guarantor) => guarantor.consentPending);
   const result = await postMajuuSync({ ...consented, neaims: placement.state, neaimsDetail: placement.detail });
   const saved = {
     ...consented,
@@ -829,7 +822,10 @@ export async function submitIndividualOnline(person: IndividualMajuu): Promise<{
     serverApplicationId: result.serverId,
   };
   await saveMajuu(saved);
-  return { person: saved, ok: result.ok, detail: result.detail };
+  const detail = result.ok && confirmationPending
+    ? 'Submitted to majuu.uwezo.go.ke. Guarantor confirmation could not be sent yet and remains pending.'
+    : result.detail;
+  return { person: saved, ok: result.ok, detail };
 }
 
 export async function submitGroupOnline(group: GroupMajuu): Promise<{ group: GroupMajuu; ok: boolean; detail: string }> {

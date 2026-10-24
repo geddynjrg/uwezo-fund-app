@@ -1,6 +1,6 @@
 {
-  "versionCode": 30,
-  "versionName": "1.1.26",
+  "versionCode": 31,
+  "versionName": "1.1.27",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Passport numbers use the Kenyan format. A saved application stays editable, with its loan number visible, until it is submitted to the online portal."
+  "notes": "An individual application is submitted even when the guarantor confirmation SMS cannot be sent. The confirmation stays pending. The application is saved before a group application exists."
 }

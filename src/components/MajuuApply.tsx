@@ -177,7 +177,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
     const uploaded = await submitIndividualOnline(requested);
     setPerson(uploaded.person);
     await reload();
-    setMessage(uploaded.ok ? 'Submitted to majuu.uwezo.go.ke. This application can no longer be changed.' : `${uploaded.detail} It is still saved on this phone and can still be changed.`);
+    setMessage(uploaded.ok ? `${uploaded.detail} This application can no longer be changed.` : `${uploaded.detail} It is still saved on this phone and can still be changed.`);
     setError('');
   }
 
@@ -352,7 +352,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
       setBusy(false);
       setMessage(
         consented.guarantors.some((guarantor) => guarantor.consentPending)
-          ? 'The guarantor confirmation SMS could not be sent. Their consent will be requested when this application is submitted online.'
+          ? 'The guarantor confirmation SMS could not be sent. You can still submit this application. The confirmation stays pending.'
           : 'A confirmation code was sent to each guarantor.',
       );
     }
@@ -634,7 +634,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
                 <p className="home-chat-note">
                   {guarantor.otpSent
                     ? 'A confirmation code was sent to this phone.'
-                    : 'Next sends a confirmation code. If the phone is offline, consent is requested when the application is submitted online.'}
+                    : 'Next sends a confirmation code. If it cannot be sent, you can still submit the application and the confirmation stays pending.'}
                 </p>
               </fieldset>
             ))}
