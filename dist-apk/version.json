@@ -1,6 +1,6 @@
 {
-  "versionCode": 32,
-  "versionName": "1.1.28",
+  "versionCode": 33,
+  "versionName": "1.1.29",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "A guarantor confirmation code must be received and entered before an application is submitted. Sign-in accepts the constituency mailbox or an LMS password when the LMS is online."
+  "notes": "Guarantor OTP is on step 4, Guarantor, under each guarantor's phone, and again on the saved application before Submit."
 }

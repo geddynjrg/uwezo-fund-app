@@ -581,20 +581,25 @@ export function guarantorConfirmationError(person: IndividualMajuu): string {
   for (let index = 0; index < person.guarantors.length; index += 1) {
     const guarantor = person.guarantors[index];
     if (!guarantor.otpSent || !guarantor.otpCode) {
-      return `Guarantor ${index + 1} has not received a confirmation code yet.`;
+      return `Send the OTP to guarantor ${index + 1}, then type it in Guarantor OTP.`;
     }
     if ((guarantor.otpEntered || '').trim() !== guarantor.otpCode) {
-      return `Enter the confirmation code sent to guarantor ${index + 1} before submitting online.`;
+      return `Type the Guarantor OTP sent to guarantor ${index + 1}. The field is under that guarantor's phone.`;
     }
   }
   return '';
 }
 
-export async function sendGuarantorOtps(person: IndividualMajuu): Promise<IndividualMajuu> {
+export async function sendGuarantorOtps(
+  person: IndividualMajuu,
+  options?: { onlyIndex?: number; resend?: boolean },
+): Promise<IndividualMajuu> {
   const guarantors = person.guarantors.map((guarantor) => ({ ...guarantor })) as [GuarantorDraft, GuarantorDraft];
   for (let index = 0; index < guarantors.length; index += 1) {
     const guarantor = guarantors[index];
-    if (guarantor.otpSent || !isLikelyKenyanMobile(guarantor.phone)) continue;
+    if (options?.onlyIndex !== undefined && index !== options.onlyIndex) continue;
+    if (!isLikelyKenyanMobile(guarantor.phone)) continue;
+    if (guarantor.otpSent && !options?.resend) continue;
     const otpCode = guarantor.otpCode || newConsentCode();
     const result = await sendEbisSms(
       guarantor.phone,
@@ -837,8 +842,9 @@ export async function submitIndividualOnline(person: IndividualMajuu): Promise<{
   let current = await sendGuarantorOtps(filled);
   const confirmationError = guarantorConfirmationError(current);
   if (confirmationError) {
-    await saveMajuu(current);
-    return { person: current, ok: false, detail: confirmationError };
+    const held = { ...current, submitRequested: false };
+    await saveMajuu(held);
+    return { person: held, ok: false, detail: confirmationError };
   }
   const result = await postMajuuSync({ ...current, neaims: placement.state, neaimsDetail: placement.detail });
   const saved = {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent, PointerEvent } from 'react';
+import type { ChangeEvent, FormEvent, PointerEvent, ReactNode } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { GROUP_BANKS, loadGroupBankBranches, type BankBranches } from '../lib/groupBanks';
 import { inferGender } from '../lib/genderFromName';
@@ -34,6 +34,7 @@ import {
   validateGroup,
   validateIndividual,
   withBudgetAmount,
+  guarantorConfirmationError,
   type GroupMajuu,
   type IndividualMajuu,
   type RosterPerson,
@@ -163,6 +164,24 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
     setMode('record');
     setMessage('Saved on this phone. It is waiting to be submitted to the online portal. You can still change any step.');
     setError('');
+  }
+
+  async function sendOtp(index: number) {
+    setBusy(true);
+    setError('');
+    const consented = await sendGuarantorOtps(person, { onlyIndex: index, resend: person.guarantors[index]?.otpSent });
+    setPerson(consented);
+    if (consented.status !== 'draft') await saveMajuu({ ...consented, submitRequested: false });
+    setBusy(false);
+    const guarantor = consented.guarantors[index];
+    if (guarantor?.otpSent) {
+      setMessage(`OTP sent to guarantor ${index + 1}. Type it in the Guarantor OTP field under that phone.`);
+      return;
+    }
+    setMessage('');
+    setError(guarantor && !guarantor.phone.trim()
+      ? `Enter a Kenyan mobile number for guarantor ${index + 1} before sending the OTP.`
+      : `The OTP could not be sent to guarantor ${index + 1}. Tap Send OTP again.`);
   }
 
   async function submitSavedPerson() {
@@ -355,10 +374,17 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
       const consented = await sendGuarantorOtps(person);
       setPerson(consented);
       setBusy(false);
+      const otpError = guarantorConfirmationError(consented);
+      const sent = consented.guarantors.every((guarantor) => guarantor.otpSent);
+      if (otpError && sent) {
+        setError(otpError);
+        setMessage('The OTP is in the Guarantor OTP field under each guarantor’s phone. Type it there before continuing.');
+        return;
+      }
       setMessage(
-        consented.guarantors.some((guarantor) => guarantor.consentPending)
-          ? 'A confirmation code could not be sent. The application can be saved on this phone, and it can be submitted online after the guarantor receives the code and you enter it.'
-          : 'A confirmation code was sent to each guarantor. Enter each code before submitting online.',
+        otpError
+          ? 'An OTP could not be sent. Use Send OTP under that guarantor’s phone. The application can be saved, and it can be submitted online only after the Guarantor OTP is entered.'
+          : 'Guarantor OTP accepted.',
       );
     }
     if (mode === 'group' && title === 'Certificate') {
@@ -637,13 +663,22 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
                   <input inputMode="tel" value={guarantor.phone} onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, phone: event.target.value, otpCode: '', otpEntered: '', otpSent: false, consentPending: false } : row) as IndividualMajuu['guarantors'] })} />
                 </label>
                 <label>
-                  Confirmation code from this guarantor
-                  <input inputMode="numeric" autoComplete="one-time-code" value={guarantor.otpEntered} onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, otpEntered: event.target.value.trim() } : row) as IndividualMajuu['guarantors'] })} />
+                  Guarantor OTP
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="OTP texted to this guarantor"
+                    value={guarantor.otpEntered}
+                    onChange={(event) => setPerson({ ...person, guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, otpEntered: event.target.value.replace(/\s/g, '') } : row) as IndividualMajuu['guarantors'] })}
+                  />
                 </label>
+                <button type="button" className="btn-ghost" disabled={busy || person.uploadedToMajuu} onClick={() => { void sendOtp(index); }}>
+                  {guarantor.otpSent ? 'Send OTP again' : 'Send OTP'}
+                </button>
                 <p className="home-chat-note">
                   {guarantor.otpSent
-                    ? 'The code was sent to this phone. Enter it here before the application is submitted online.'
-                    : 'Next sends the confirmation code. The application cannot be submitted online until this guarantor receives the code and you enter it.'}
+                    ? 'The OTP was sent to this phone. The applicant types it in Guarantor OTP, above, before the application is submitted online.'
+                    : 'Tap Send OTP. The guarantor receives the code by text. The applicant types it in Guarantor OTP, above.'}
                 </p>
               </fieldset>
             ))}
@@ -873,6 +908,14 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
               setMessage('');
               setError('');
             }}
+            beforeSubmit={person.uploadedToMajuu ? null : (
+              <GuarantorOtpFields
+                person={person}
+                busy={busy}
+                onChange={setPerson}
+                onSend={(index) => { void sendOtp(index); }}
+              />
+            )}
             onSubmit={() => {
               setBusy(true);
               void submitSavedPerson().finally(() => setBusy(false));
@@ -1150,6 +1193,7 @@ function SavedRecord({
   steps,
   onEdit,
   onSubmit,
+  beforeSubmit,
 }: {
   title: string;
   number: string;
@@ -1158,6 +1202,7 @@ function SavedRecord({
   steps: string[];
   onEdit?: (index: number) => void;
   onSubmit: () => void;
+  beforeSubmit?: ReactNode;
 }) {
   return (
     <div className="account-form">
@@ -1169,6 +1214,7 @@ function SavedRecord({
           ? 'This application has been submitted to the online portal. No further changes can be made.'
           : 'This application is saved on this phone and is waiting to be submitted to the online portal. You can still open any step and change it.'}
       </p>
+      {beforeSubmit}
       {onEdit ? steps.map((label, index) => (
         <button key={label} type="button" className="btn-ghost" onClick={() => onEdit(index)}>
           Edit {label}
@@ -1179,6 +1225,49 @@ function SavedRecord({
           {busy ? 'Submitting…' : 'Submit to the online portal'}
         </button>
       )}
+    </div>
+  );
+}
+
+function GuarantorOtpFields({
+  person,
+  busy,
+  onChange,
+  onSend,
+}: {
+  person: IndividualMajuu;
+  busy: boolean;
+  onChange: (person: IndividualMajuu) => void;
+  onSend: (index: number) => void;
+}) {
+  return (
+    <div className="account-form">
+      <h2>Guarantor OTP</h2>
+      <p className="home-chat-note">
+        The same field is on step 4, Guarantor, under each guarantor’s phone. Type the code that was texted to that phone before submitting online.
+      </p>
+      {person.guarantors.map((guarantor, index) => (
+        <fieldset className="offline-member" key={index}>
+          <legend>Guarantor {index + 1} OTP</legend>
+          <p className="home-chat-note">{guarantor.name || 'Guarantor'} · {guarantor.phone || 'No phone yet'}</p>
+          <label>
+            Guarantor OTP
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="OTP texted to this guarantor"
+              value={guarantor.otpEntered}
+              onChange={(event) => onChange({
+                ...person,
+                guarantors: person.guarantors.map((row, rowIndex) => rowIndex === index ? { ...row, otpEntered: event.target.value.replace(/\s/g, '') } : row) as IndividualMajuu['guarantors'],
+              })}
+            />
+          </label>
+          <button type="button" className="btn-ghost" disabled={busy || person.uploadedToMajuu} onClick={() => onSend(index)}>
+            {guarantor.otpSent ? 'Send OTP again' : 'Send OTP'}
+          </button>
+        </fieldset>
+      ))}
     </div>
   );
 }
