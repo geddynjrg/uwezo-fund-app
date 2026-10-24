@@ -17,15 +17,28 @@ import {
   type AppSession,
 } from '../lib/session';
 import { stopOtpListener } from '../lib/native';
+import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
+import { LINKS } from '../config';
+import { probeOrigin, type PortalId } from '../lib/portalStatus';
+import { syncLmsMailbox } from '../lib/lmsSync';
+import { isConstituencyMailbox, signInConstituencyOfficer, standardMailboxPassword } from '../lib/zimbraAuth';
 
 type Mode = 'menu' | 'login' | 'reset' | 'signed_in';
 
 type AccountAuthProps = {
   onBack: () => void;
   onSessionChange?: (session: AppSession | null) => void;
+  onContinueOffline?: (portal: PortalId) => void;
+  onOpenLms?: (officer: {
+    email: string;
+    constituency: string;
+    passwordReset: boolean;
+    role: 'constituency' | 'headquarters' | 'secretariat' | 'staff';
+    syncDetail: string;
+  }) => void;
 };
 
-export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
+export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpenLms }: AccountAuthProps) {
   const [mode, setMode] = useState<Mode>('menu');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,6 +59,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
     phoneRequestId: string;
     phoneChannel: string;
   } | null>(null);
+  const [savedForLater, setSavedForLater] = useState(false);
 
   useEffect(() => {
     const existing = getActiveSession();
@@ -107,24 +121,64 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
       setError('Password must be at least 8 characters.');
       return;
     }
+    if (isConstituencyMailbox(emailNorm)) {
+      setBusy(true);
+      setError('');
+      setSavedForLater(false);
+      try {
+        const officer = await signInConstituencyOfficer(emailNorm, password);
+        if (!officer.ok) {
+          setError(officer.message);
+          return;
+        }
+        const mailboxPassword = officer.passwordReset ? standardMailboxPassword() : password;
+        const synced = await syncLmsMailbox(officer.email, mailboxPassword);
+        onOpenLms?.({
+          email: officer.email,
+          constituency: officer.constituency,
+          passwordReset: officer.passwordReset,
+          role: synced.role,
+          syncDetail: synced.detail,
+        });
+      } catch {
+        setError('Could not reach mail.govmail.ke. Check your connection, then try again.');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!isLikelyKenyanMobile(phoneNorm)) {
       setError('Enter a valid Kenyan mobile number such as 07XXXXXXXX or 01XXXXXXXX.');
       return;
     }
     const simMatch = simNumbers.some((number) => sameKenyanLine(number, phoneNorm));
-    if (Capacitor.isNativePlatform()) {
-      if (navigator.onLine === false || simState === 'offline') {
-        setError('Connect to the internet so the app can verify this phone number.');
-        return;
-      }
-      if (simState === 'checking') {
-        setError('Wait for the SIM number to be read.');
-        return;
-      }
+    function keepForLater() {
+      savePendingLogin({
+        email: emailNorm,
+        password,
+        phone: phoneNorm,
+        remainSignedIn,
+        simVerified: simMatch,
+      });
+      setError('');
+      setSavedForLater(true);
+      setMessage(
+        'Sign-in is saved on this phone. Majuu did not answer, so you can continue the loan or Wezesha Majuu application now. These credentials will be used when Majuu answers.',
+      );
+    }
+    if (Capacitor.isNativePlatform() && simState === 'checking') {
+      setError('Wait for the SIM number to be read.');
+      return;
     }
     setBusy(true);
     setError('');
+    setSavedForLater(false);
     try {
+      const majuuUp = await probeOrigin(LINKS.majuu.url);
+      if (!majuuUp || navigator.onLine === false) {
+        keepForLater();
+        return;
+      }
       if (Capacitor.isNativePlatform() && !simMatch) {
         if (!otpChallenge) {
           const sent = await requestContactConfirmation({
@@ -184,6 +238,7 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
       };
       if (!next.accessToken) throw new Error('Login succeeded but no access token returned.');
       saveSession(next);
+      clearPendingLogin();
       applySession(next);
       setMode('signed_in');
       setMessage(
@@ -192,6 +247,10 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
           : 'Signed in. You will stay signed in on this device.',
       );
     } catch (err) {
+      if (isUnreachableError(err)) {
+        keepForLater();
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setBusy(false);
@@ -244,6 +303,16 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
       <div className="chat-thread">
         {message ? <div className="bubble bubble--bot">{message}</div> : null}
         {error ? <div className="bubble bubble--system">{error}</div> : null}
+        {savedForLater && onContinueOffline ? (
+          <div className="chat-success__actions">
+            <button type="button" className="btn-primary" onClick={() => onContinueOffline('loans')}>
+              Continue loan application
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => onContinueOffline('majuu')}>
+              Continue Wezesha Majuu
+            </button>
+          </div>
+        ) : null}
 
         {mode === 'menu' ? (
           <div className="chat-success__actions">
@@ -291,7 +360,8 @@ export function AccountAuth({ onBack, onSessionChange }: AccountAuthProps) {
             <p className="home-chat-note">
               One email, phone, and password is checked for Wezesha Majuu and Loans. You
               do not choose a portal. A portal is opened only when that same password is
-              already accepted there.
+              already accepted there. A constituency mailbox such as turkanawest@uwezo.go.ke
+              is checked at mail.govmail.ke and then opens the LMS on this phone.
             </p>
             <label>
               Email

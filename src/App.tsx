@@ -5,6 +5,9 @@ import { AccountAuth } from './components/AccountAuth';
 import { Authenticator } from './components/Authenticator';
 import { Home } from './components/Home';
 import { Notifications } from './components/Notifications';
+import { LmsMobile } from './components/LmsMobile';
+import { MajuuApply } from './components/MajuuApply';
+import { OfflineApply } from './components/OfflineApply';
 import { QrLoginScan } from './components/QrLoginScan';
 import {
   getActiveSession,
@@ -15,7 +18,11 @@ import {
 import { registerPushDevice, INBOX_ORIGINS, canonicalAuthOrigin } from './lib/appAuth';
 import { syncInbox } from './lib/inboxSync';
 import { ensureFreshSession } from './lib/keepSession';
+import { flushMajuuNotices, flushMajuuUploads } from './lib/majuuApply';
+import { syncPending } from './lib/offlineApply';
+import { replayPendingLogin } from './lib/pendingLogin';
 import { ensureNotifyPermission } from './lib/notify';
+import { probePortals, type PortalAvailability, type PortalId } from './lib/portalStatus';
 import {
   copyOtpText,
   extractOtpCode,
@@ -23,13 +30,52 @@ import {
 } from './lib/native';
 import './App.css';
 
-type Screen = 'home' | 'qr' | 'account' | 'notifications' | 'authenticator';
+type Screen = 'home' | 'qr' | 'account' | 'notifications' | 'authenticator' | 'offline' | 'lms';
+type LmsOfficer = {
+  email: string;
+  constituency: string;
+  passwordReset: boolean;
+  role: 'constituency' | 'headquarters' | 'secretariat' | 'staff';
+  syncDetail: string;
+};
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
+  const [offlinePortal, setOfflinePortal] = useState<PortalId>('loans');
+  const [lmsOfficer, setLmsOfficer] = useState<LmsOfficer | null>(null);
+  const [portals, setPortals] = useState<PortalAvailability>({ loans: null, majuu: null });
   const [session, setSession] = useState<AppSession | null>(null);
   const [toast, setToast] = useState<AppNotification | null>(null);
   const showStaging = import.meta.env.VITE_SHOW_LOANS_STAGING === 'true';
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkPortals() {
+      const next = await probePortals();
+      if (cancelled) return;
+      setPortals(next);
+      if (next.majuu) {
+        const login = await replayPendingLogin();
+        if (!cancelled && login === 'signed-in') setSession(getActiveSession());
+      }
+      if (next.loans || next.majuu) void syncPending();
+      if (next.majuu) {
+        void flushMajuuNotices();
+        void flushMajuuUploads();
+      }
+    }
+    void checkPortals();
+    let resume: Promise<{ remove: () => Promise<void> | void }> | null = null;
+    if (Capacitor.isNativePlatform()) {
+      resume = CapApp.addListener('resume', () => {
+        void checkPortals();
+      });
+    }
+    return () => {
+      cancelled = true;
+      void resume?.then((handle) => handle.remove());
+    };
+  }, []);
 
   useEffect(() => {
     setSession(getActiveSession());
@@ -171,6 +217,14 @@ function App() {
       <AccountAuth
         onBack={() => setScreen('home')}
         onSessionChange={(s) => setSession(s)}
+        onContinueOffline={(portal) => {
+          setOfflinePortal(portal);
+          setScreen('offline');
+        }}
+        onOpenLms={(officer) => {
+          setLmsOfficer(officer);
+          setScreen('lms');
+        }}
       />
     );
   }
@@ -185,6 +239,21 @@ function App() {
       </>
     );
   }
+  if (screen === 'lms' && lmsOfficer) {
+    return <LmsMobile officer={lmsOfficer} onBack={() => setScreen('home')} />;
+  }
+  if (screen === 'offline') {
+    return (
+      <>
+        {offlinePortal === 'majuu' ? (
+          <MajuuApply onBack={() => setScreen('home')} />
+        ) : (
+          <OfflineApply portal={offlinePortal} onBack={() => setScreen('home')} />
+        )}
+        {toastUi}
+      </>
+    );
+  }
 
   return (
     <>
@@ -193,6 +262,11 @@ function App() {
         onOpenAccount={() => setScreen('account')}
         onOpenNotifications={() => setScreen('notifications')}
         onOpenAuthenticator={() => setScreen('authenticator')}
+        onOpenOffline={(portal) => {
+          setOfflinePortal(portal);
+          setScreen('offline');
+        }}
+        portals={portals}
         session={session}
         showStaging={showStaging}
       />

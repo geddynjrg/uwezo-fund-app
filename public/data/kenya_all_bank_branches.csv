@@ -1,0 +1,1298 @@
+id,branchName,bank
+1,Equity Bank Head Office,Equity Bank
+2,Equity Bank Corporate,Equity Bank
+3,Equity Bank Fourways,Equity Bank
+4,Kangema,Equity Bank
+5,Karatina,Equity Bank
+6,Kiriaini,Equity Bank
+7,Murarandia,Equity Bank
+8,Kangari,Equity Bank
+9,Othaya,Equity Bank
+10,Thika / Equity Plaza,Equity Bank
+11,Kerugoya,Equity Bank
+12,Nyeri,Equity Bank
+13,Tom Mboya,Equity Bank
+14,Nakuru,Equity Bank
+15,Meru,Equity Bank
+16,Mama Ngina,Equity Bank
+17,Nyahururu,Equity Bank
+18,Community,Equity Bank
+19,Community Corporate,Equity Bank
+20,Embu,Equity Bank
+21,Naivasha,Equity Bank
+22,Chuka,Equity Bank
+23,Muranga,Equity Bank
+24,Molo,Equity Bank
+25,Harambee Avenu,Equity Bank
+26,Mombasa,Equity Bank
+27,Kimathi Street,Equity Bank
+28,Nanyuki,Equity Bank
+29,Kericho,Equity Bank
+30,Kisumu,Equity Bank
+31,Eldoret,Equity Bank
+32,Nakuru Kenyatta Avenue,Equity Bank
+33,Kariobangi,Equity Bank
+34,Kitale,Equity Bank
+35,Thika Kenyatta Avenue,Equity Bank
+36,Knut House,Equity Bank
+37,Narok,Equity Bank
+38,Nkubu,Equity Bank
+39,Mwea,Equity Bank
+40,Matuu,Equity Bank
+41,Maua,Equity Bank
+42,Isiolo,Equity Bank
+43,Kagio,Equity Bank
+44,Gikomba,Equity Bank
+45,Ukunda,Equity Bank
+46,Malindi,Equity Bank
+47,Mombasa Digo Road,Equity Bank
+48,Moi Avenue,Equity Bank
+49,Bungoma,Equity Bank
+50,Kapsabet,Equity Bank
+51,Kakamega,Equity Bank
+52,Kisii,Equity Bank
+53,Nyamira,Equity Bank
+54,Litein,Equity Bank
+55,Equity Centre Diaspora,Equity Bank
+56,Westlands,Equity Bank
+57,Industrial Area Kenpipe Plaza,Equity Bank
+58,Kikuyu,Equity Bank
+59,Garissa,Equity Bank
+60,Mwingi,Equity Bank
+61,Machakos,Equity Bank
+62,Ongata Rongai,Equity Bank
+63,Ol-kalao,Equity Bank
+64,Kawangware,Equity Bank
+65,Kiambu,Equity Bank
+66,Kayole,Equity Bank
+67,Gatundu,Equity Bank
+68,Wote,Equity Bank
+69,Mumias,Equity Bank
+70,Limuru,Equity Bank
+71,Kitengela,Equity Bank
+72,Githurai,Equity Bank
+73,Kitui,Equity Bank
+74,Ngong,Equity Bank
+75,Loitoktok,Equity Bank
+76,Bondo,Equity Bank
+77,Mbita,Equity Bank
+78,Gilgil,Equity Bank
+79,Busia,Equity Bank
+80,Voi,Equity Bank
+81,Enterprise Road,Equity Bank
+82,Equity Centre,Equity Bank
+83,Donholm,Equity Bank
+84,Mukurwe-ini,Equity Bank
+85,Eastleigh,Equity Bank
+86,Namanga,Equity Bank
+87,Kajiado,Equity Bank
+88,Ruiru,Equity Bank
+89,Otc,Equity Bank
+90,Kenol,Equity Bank
+91,Tala,Equity Bank
+92,Ngara,Equity Bank
+93,Nandi Hills,Equity Bank
+94,Githunguri,Equity Bank
+95,Tea Room,Equity Bank
+96,Buru Buru,Equity Bank
+97,Mbale,Equity Bank
+98,Siaya,Equity Bank
+99,Homa Bay,Equity Bank
+100,Lodwar,Equity Bank
+101,Mandera,Equity Bank
+102,Marsabit,Equity Bank
+103,Moyale,Equity Bank
+104,Wajir,Equity Bank
+105,Meru Makutano,Equity Bank
+106,Malaba Town,Equity Bank
+107,Kilifi,Equity Bank
+108,Kapenguria,Equity Bank
+109,Mombasa Road,Equity Bank
+110,Eldoret Market,Equity Bank
+111,Maralal,Equity Bank
+112,Kimende,Equity Bank
+113,Luanda,Equity Bank
+114,Ku Sub Branch,Equity Bank
+115,Kengeleni,Equity Bank
+116,Nyeri Kimathi Way,Equity Bank
+117,Migori,Equity Bank
+118,Kibera,Equity Bank
+119,Kasarani,Equity Bank
+120,Mtwapa,Equity Bank
+121,Changamwe,Equity Bank
+122,Hola,Equity Bank
+123,Bomet,Equity Bank
+124,Kilgoris,Equity Bank
+125,Keroka,Equity Bank
+126,KAREN,Equity Bank
+127,KISUMU ANGAWA AVE,Equity Bank
+128,MPEKETONI,Equity Bank
+129,NAIROBI WEST,Equity Bank
+130,KENYATTA AVENUE,Equity Bank
+131,City Hall,Equity Bank
+132,Eldama Ravine,Equity Bank
+133,Embakasi,Equity Bank
+134,KPCU,Equity Bank
+135,Ridgeways,Equity Bank
+136,Runyenjes Sub Branch,Equity Bank
+137,Dadaab,Equity Bank
+138,Kangemi,Equity Bank
+139,Nyali Centre Corporate,Equity Bank
+140,Kabarnet,Equity Bank
+141,Westlands Corporate,Equity Bank
+142,Lavington Corporate,Equity Bank
+143,Taita Taveta,Equity Bank
+144,Awendo,Equity Bank
+145,Ruai,Equity Bank
+146,Kilimani,Equity Bank
+147,Nakuru Westside Mall,Equity Bank
+148,Kilimani Supreme,Equity Bank
+149,JKIA Cargo Centre,Equity Bank
+150,EPZ Athi River,Equity Bank
+151,Oyugis,Equity Bank
+152,Mayfair Supreme Centre,Equity Bank
+153,Juja,Equity Bank
+154,Iten,Equity Bank
+155,Nyali Supreme Centre,Equity Bank
+156,Thika Supreme Centre,Equity Bank
+157,Mombasa Supreme Centre,Equity Bank
+158,Kapsowar Sub-Branch,Equity Bank
+159,Kwale,Equity Bank
+160,Lamu,Equity Bank
+161,Kenyatta Avenue Supreme,Equity Bank
+162,KPA Sub-Branch Mombasa,Equity Bank
+163,Gigiri Supreme Centre,Equity Bank
+164,Karen Supreme Centre,Equity Bank
+165,Eldoret Supreme Centre,Equity Bank
+166,Kakuma,Equity Bank
+167,Archers Post,Equity Bank
+168,Mutomo,Equity Bank
+169,Kiserian Sub Branch,Equity Bank
+170,Dagoretti Corner,Equity Bank
+171,Kisumu Supreme Centre,Equity Bank
+172,Thika Makongeni,Equity Bank
+173,Kutus Sub – Branch,Equity Bank
+174,Kibwezi Sub – Branch,Equity Bank
+175,Ruaka,Equity Bank
+176,Garden City,Equity Bank
+177,Mlolongo,Equity Bank
+178,Embassy House,Equity Bank
+179,Wangige Sub Branch,Equity Bank
+180,Utawala,Equity Bank
+181,Kawangware sub Branch,Equity Bank
+182,Emali Branch,Equity Bank
+183,Kagwe Sub – Branch,Equity Bank
+184,Rumuruti Branch,Equity Bank
+185,Sotik,Equity Bank
+186,Laare,Equity Bank
+187,Equity Hapo Hapo,Equity Bank
+188,Family Bank Towers Corp,Family Bank
+189,Kiambu Branch,Family Bank
+190,Githunguri Branch,Family Bank
+191,Sonalux Branch,Family Bank
+192,Gatundu Branch,Family Bank
+193,Muranga Branch,Family Bank
+194,Kangari Branch,Family Bank
+195,Kangema Branch,Family Bank
+196,JKIA Branch,Family Bank
+197,Othaya Branch,Family Bank
+198,Kenyatta Avenue Branch,Family Bank
+199,Cargen Branch,Family Bank
+200,Laptrust Branch,Family Bank
+201,City Hall Branch,Family Bank
+202,Kasarani Branch,Family Bank
+203,Nakuru Finance Branch,Family Bank
+204,Nakuru Markert Branch,Family Bank
+205,Kutus Branch,Family Bank
+206,Dagoretti Branch,Family Bank
+207,Kiria-ini Branch,Family Bank
+208,Kericho Branch,Family Bank
+209,Nyahururu Branch,Family Bank
+210,Ruiru Branch,Family Bank
+211,Kisumu Reliance Branch,Family Bank
+212,Nyamira Branch,Family Bank
+213,Kisii Branch,Family Bank
+214,Kisumu Express Branch,Family Bank
+215,Narok Branch,Family Bank
+216,Kangemi Branch,Family Bank
+217,Industrial Area Branch,Family Bank
+218,Thika Makongeni Branch,Family Bank
+219,Donholm Branch,Family Bank
+220,Utawala Branch,Family Bank
+221,Family Bank Towers Retail,Family Bank
+222,Mlolongo Branch,Family Bank
+223,Ol Kalou Branch,Family Bank
+224,KTDA Retail Branch,Family Bank
+225,Gateway Mall Branch,Family Bank
+226,Kariobangi Branch,Family Bank
+227,Gikomba Area 42 Branch,Family Bank
+228,Gikomba Branch,Family Bank
+229,Kahawa West Branch,Family Bank
+230,Githurai Branch,Family Bank
+231,Kilimani Branch,Family Bank
+232,Limuru Branch,Family Bank
+233,Westlands Branch,Family Bank
+234,Kagwe Branch,Family Bank
+235,Ruaka Branch,Family Bank
+236,Ruaka Branch,Family Bank
+237,Naivasha Branch,Family Bank
+238,Chuka Branch,Family Bank
+239,Nyeri Branch,Family Bank
+240,Karatina Branch,Family Bank
+241,Kerugoya Branch,Family Bank
+242,Tom Mboya Branch,Family Bank
+243,River Road Branch,Family Bank
+244,Kayole Branch,Family Bank
+245,Nkubu Branch,Family Bank
+246,Meru Branch,Family Bank
+247,Nanyuki Branch,Family Bank
+248,KTDA Corporate Branch,Family Bank
+249,Ongata Rongai Branch,Family Bank
+250,Banana Branch,Family Bank
+251,Mwea Branch,Family Bank
+252,Ngara Branch,Family Bank
+253,Kitengela Branch,Family Bank
+254,Kitui Branch,Family Bank
+255,Machakos Branch,Family Bank
+256,Migori Branch,Family Bank
+257,Embu Branch,Family Bank
+258,Bungoma Branch,Family Bank
+259,Kakamega Branch,Family Bank
+260,Busia Branch,Family Bank
+261,Mumias Branch,Family Bank
+262,Eldoret West Branch,Family Bank
+263,Molo Branch,Family Bank
+264,Bomet Branch,Family Bank
+265,Eldoret Branch,Family Bank
+266,Litein Branch,Family Bank
+267,Wote Branch,Family Bank
+268,Ukunda Branch,Family Bank
+269,MBS Digo Branch,Family Bank
+270,Kitale Branch,Family Bank
+271,Mtwapa Branch,Family Bank
+272,Mombasa Branch (Nkrumah),Family Bank
+273,Mombasa Branch (Kenyatta Avenue),Family Bank
+274,Kapsabet Branch,Family Bank
+275,Malindi Branch,Family Bank
+276,Kikuyu Branch,Family Bank
+277,Kapsabet,ABSA Bank
+278,Eldoret,ABSA Bank
+279,Embu,ABSA Bank
+280,Muranga,ABSA Bank
+281,Kapenguria,ABSA Bank
+282,Kericho,ABSA Bank
+283,Kisii,ABSA Bank
+284,Kisumu,ABSA Bank
+285,Parkside Towers,ABSA Bank
+286,Limuru,ABSA Bank
+287,Malindi,ABSA Bank
+288,Meru,ABSA Bank
+289,Eastleigh,ABSA Bank
+290,Kitui,ABSA Bank
+291,Nkrumah Rd,ABSA Bank
+292,Garissa,ABSA Bank
+293,Kisii,ABSA Bank
+294,Kilifi,ABSA Bank
+295,Westlands,ABSA Bank
+296,Gilgil,ABSA Bank
+297,Thika Road Mall,ABSA Bank
+298,Kakamega,ABSA Bank
+299,Nakuru East,ABSA Bank
+300,BuruBuru,ABSA Bank
+301,Bomet,ABSA Bank
+302,Nyeri,ABSA Bank
+303,Thika,ABSA Bank
+304,Nkrumah Rd,ABSA Bank
+305,Gikomba,ABSA Bank
+306,Lavington,ABSA Bank
+307,Mbale,ABSA Bank
+308,Premier,ABSA Bank
+309,River Road,ABSA Bank
+310,River Road,ABSA Bank
+311,Kakamega,ABSA Bank
+312,Machakos,ABSA Bank
+313,Narok,ABSA Bank
+314,Isiolo,ABSA Bank
+315,Head Office,Co-operative Bank
+316,Finance And Accounts,Co-operative Bank
+317,Co-op House,Co-operative Bank
+318,Kisumu,Co-operative Bank
+319,Nkurumah Road,Co-operative Bank
+320,Meru,Co-operative Bank
+321,Nakuru,Co-operative Bank
+322,Industrial Area,Co-operative Bank
+323,Kisii,Co-operative Bank
+324,Machakos,Co-operative Bank
+325,Nyeri,Co-operative Bank
+326,Ukulima,Co-operative Bank
+327,Kerugoya,Co-operative Bank
+328,Eldoret,Co-operative Bank
+329,Moi Avenue,Co-operative Bank
+330,Naivasha,Co-operative Bank
+331,Nyahururu,Co-operative Bank
+332,Chuka,Co-operative Bank
+333,Wakulima Market,Co-operative Bank
+334,Eastleigh,Co-operative Bank
+335,Kiambu,Co-operative Bank
+336,Homa Bay,Co-operative Bank
+337,Embu,Co-operative Bank
+338,Kericho,Co-operative Bank
+339,Bungoma,Co-operative Bank
+340,Muranga,Co-operative Bank
+341,Kayole,Co-operative Bank
+342,Karatina,Co-operative Bank
+343,Ukunda,Co-operative Bank
+344,Mtwapa,Co-operative Bank
+345,University Way,Co-operative Bank
+346,Buru Buru,Co-operative Bank
+347,Athi River,Co-operative Bank
+348,Mumias,Co-operative Bank
+349,Stima Plaza,Co-operative Bank
+350,Westlands,Co-operative Bank
+351,Upper Hill,Co-operative Bank
+352,Ongata Rongai,Co-operative Bank
+353,Thika,Co-operative Bank
+354,Nacico,Co-operative Bank
+355,Kariobangi,Co-operative Bank
+356,Kawangware,Co-operative Bank
+357,Makutano,Co-operative Bank
+358,Parliament road,Co-operative Bank
+359,Kimathi Street,Co-operative Bank
+360,Kitale,Co-operative Bank
+361,Githurai,Co-operative Bank
+362,Maua,Co-operative Bank
+363,City Hall,Co-operative Bank
+364,Digo Rd,Co-operative Bank
+365,Nbc,Co-operative Bank
+366,Kakamega,Co-operative Bank
+367,Migori,Co-operative Bank
+368,Kenyatta Avenue,Co-operative Bank
+369,Nkubu,Co-operative Bank
+370,Enterprise Road,Co-operative Bank
+371,Busia,Co-operative Bank
+372,Siaya,Co-operative Bank
+373,Voi,Co-operative Bank
+374,Mariakani,Co-operative Bank
+375,Malindi,Co-operative Bank
+376,Zimmerman,Co-operative Bank
+377,Nakuru East,Co-operative Bank
+378,Kitengela,Co-operative Bank
+379,Aga Khan Walk,Co-operative Bank
+380,Narok,Co-operative Bank
+381,Kitui,Co-operative Bank
+382,Nanyuki,Co-operative Bank
+383,Embakasi,Co-operative Bank
+384,Kibera,Co-operative Bank
+385,Siakago,Co-operative Bank
+386,Kapsabet,Co-operative Bank
+387,Mbita,Co-operative Bank
+388,Kangemi,Co-operative Bank
+389,Dandora,Co-operative Bank
+390,Kajiado,Co-operative Bank
+391,Tala,Co-operative Bank
+392,Gikomba,Co-operative Bank
+393,River Road,Co-operative Bank
+394,Nyamira,Co-operative Bank
+395,Garisa,Co-operative Bank
+396,Bomet,Co-operative Bank
+397,Keroka,Co-operative Bank
+398,Gilgil,Co-operative Bank
+399,Tom Mboya,Co-operative Bank
+400,Likoni,Co-operative Bank
+401,Donholm,Co-operative Bank
+402,Mwingi,Co-operative Bank
+403,Ruaka,Co-operative Bank
+404,Webuye,Co-operative Bank
+405,Sacco Clearing Unit,Co-operative Bank
+406,clearing Centre,Co-operative Bank
+407,Ndhiwa,Co-operative Bank
+408,Oyugis,Co-operative Bank
+409,Isiolo,Co-operative Bank
+410,Eldoret West,Co-operative Bank
+411,Changamwe,Co-operative Bank
+412,Kisumu East,Co-operative Bank
+413,Githurai Kimbo,Co-operative Bank
+414,Mlolongo,Co-operative Bank
+415,Kilifi,Co-operative Bank
+416,Ol Kalau,Co-operative Bank
+417,Mbale,Co-operative Bank
+418,Kimilili,Co-operative Bank
+419,Kisii East,Co-operative Bank
+420,Kilgoris,Co-operative Bank
+421,Wote,Co-operative Bank
+422,Malaba,Co-operative Bank
+423,Molo,Co-operative Bank
+424,Mwea,Co-operative Bank
+425,Kutus,Co-operative Bank
+426,Umoja,Co-operative Bank
+427,Embakasi Junction,Co-operative Bank
+428,Kongowea,Co-operative Bank
+429,Langata Road,Co-operative Bank
+430,Juja,Co-operative Bank
+431,Ngong,Co-operative Bank
+432,Kawangware 46,Co-operative Bank
+433,Mombasa Road,Co-operative Bank
+434,Marsabit,Co-operative Bank
+435,Dagoretti,Co-operative Bank
+436,Othaya,Co-operative Bank
+437,Limuru,Co-operative Bank
+438,Kikuyu,Co-operative Bank
+439,Githunguri,Co-operative Bank
+440,Karen,Co-operative Bank
+441,Mpeketoni,Co-operative Bank
+442,Gatundu,Co-operative Bank
+443,Ruiru,Co-operative Bank
+444,Nyali Mall,Co-operative Bank
+445,Yala,Co-operative Bank
+446,Maasai Mall – Ongata Rongai,Co-operative Bank
+447,Thika Road Mall,Co-operative Bank
+448,Kiserian,Co-operative Bank
+449,Nandi Hills,Co-operative Bank
+450,Lodwar,Co-operative Bank
+451,Engineer,Co-operative Bank
+452,Rongo,Co-operative Bank
+453,Lavington Mall,Co-operative Bank
+454,Bondo,Co-operative Bank
+455,Gigiri Mall,Co-operative Bank
+456,"United Mall, Kisumu",Co-operative Bank
+457,Green House Mall,Co-operative Bank
+458,Gikomba Area 42,Co-operative Bank
+459,Utawala,Co-operative Bank
+460,Ridgeways Mall,Co-operative Bank
+461,Two Rivers Mall,Co-operative Bank
+462,JKIA,Co-operative Bank
+463,Emali,Co-operative Bank
+464,Kangema,Co-operative Bank
+465,Kilimani,Co-operative Bank
+466,Litein,Co-operative Bank
+467,Thika Makongeni,Co-operative Bank
+468,Kenyatta Avenue,Co-operative Bank
+469,Chogoria,Co-operative Bank
+470,Kapenguria Sub – Branch,Co-operative Bank
+471,Maralal,Co-operative Bank
+472,Shares Operations,Co-operative Bank
+473,Back Office Operations,Co-operative Bank
+474,E- Channels Unit,Co-operative Bank
+475,Diaspora Banking,Co-operative Bank
+476,Kilindini Port,Co-operative Bank
+477,Money Transfers Agency,Co-operative Bank
+478,Eastleigh,KCB Bank
+479,KCB CPC,KCB Bank
+480,Head Office,KCB Bank
+481,Wote,KCB Bank
+482,Head Office Finance,KCB Bank
+483,Moi Avenue Nairobi,KCB Bank
+484,Kipande House,KCB Bank
+485,Treasury Sq Mombasa,KCB Bank
+486,Nakuru,KCB Bank
+487,Kicc,KCB Bank
+488,Kisumu,KCB Bank
+489,Kericho,KCB Bank
+490,Tom Mboya,KCB Bank
+491,Thika,KCB Bank
+492,Eldoret,KCB Bank
+493,Kakamega,KCB Bank
+494,Kilindini Mombasa,KCB Bank
+495,Nyeri,KCB Bank
+496,Industrial Area Nairobi,KCB Bank
+497,River Road,KCB Bank
+498,Muranga,KCB Bank
+499,Embu,KCB Bank
+500,Kangema,KCB Bank
+501,Kiambu,KCB Bank
+502,Karatina,KCB Bank
+503,Siaya,KCB Bank
+504,Nyahururu,KCB Bank
+505,Meru,KCB Bank
+506,Mumias,KCB Bank
+507,Nanyuki,KCB Bank
+508,Moyale,KCB Bank
+509,Kikuyu,KCB Bank
+510,Tala,KCB Bank
+511,Kajiado,KCB Bank
+512,KCB Custody services,KCB Bank
+513,Matuu,KCB Bank
+514,Kitui,KCB Bank
+515,Mvita,KCB Bank
+516,Jogoo Rd Nairobi,KCB Bank
+517,Card Centre,KCB Bank
+518,Marsabit,KCB Bank
+519,Sarit Centre,KCB Bank
+520,Loitokitok,KCB Bank
+521,Nandi Hills,KCB Bank
+522,Lodwar,KCB Bank
+523,UN Gigiri,KCB Bank
+524,Hola,KCB Bank
+525,Ruiru,KCB Bank
+526,Mwingi,KCB Bank
+527,Kitale,KCB Bank
+528,Mandera,KCB Bank
+529,Kapenguria,KCB Bank
+530,Kabarnet,KCB Bank
+531,Wajir,KCB Bank
+532,Maralal,KCB Bank
+533,Limuru,KCB Bank
+534,Ukunda,KCB Bank
+535,Iten,KCB Bank
+536,Gilgil,KCB Bank
+537,Ongata Rongai,KCB Bank
+538,Kitengela,KCB Bank
+539,Eldama Ravine,KCB Bank
+540,Kibwezi,KCB Bank
+541,Kapsabet,KCB Bank
+542,University Way,KCB Bank
+543,KCB Eldoret West,KCB Bank
+544,Garissa,KCB Bank
+545,Lamu,KCB Bank
+546,Kilifi,KCB Bank
+547,Milimani,KCB Bank
+548,Nyamira,KCB Bank
+549,Mukuruweini,KCB Bank
+550,Village Market,KCB Bank
+551,Bomet,KCB Bank
+552,Mbale,KCB Bank
+553,Narok,KCB Bank
+554,Othaya,KCB Bank
+555,Voi,KCB Bank
+556,Webuye,KCB Bank
+557,Sotik,KCB Bank
+558,Naivasha,KCB Bank
+559,Kisii,KCB Bank
+560,Migori,KCB Bank
+561,Githunguri,KCB Bank
+562,Machakos,KCB Bank
+563,Kerugoya,KCB Bank
+564,Chuka,KCB Bank
+565,Bungoma,KCB Bank
+566,Wundanyi,KCB Bank
+567,Malindi,KCB Bank
+568,Capital Hill,KCB Bank
+569,Karen,KCB Bank
+570,Lokichogio,KCB Bank
+571,Gateway Msa Road,KCB Bank
+572,Buruburu,KCB Bank
+573,Chogoria,KCB Bank
+574,Kangare,KCB Bank
+575,Kianyaga,KCB Bank
+576,Nkubu,KCB Bank
+577,Ol Kalou,KCB Bank
+578,Makuyu,KCB Bank
+579,Mwea,KCB Bank
+580,Njambini,KCB Bank
+581,Gatundu,KCB Bank
+582,Emali,KCB Bank
+583,Isiolo,KCB Bank
+584,KCB Flamingo,KCB Bank
+585,Njoro,KCB Bank
+586,Mutomo,KCB Bank
+587,Mariakani,KCB Bank
+588,Mpeketoni,KCB Bank
+589,Mtitu Andei,KCB Bank
+590,Mtwapa,KCB Bank
+591,Taveta,KCB Bank
+592,Kengeleni,KCB Bank
+593,Garsen,KCB Bank
+594,Watamu,KCB Bank
+595,Bondo,KCB Bank
+596,Busia,KCB Bank
+597,Homa Bay,KCB Bank
+598,Kapsowar,KCB Bank
+599,Kehancha,KCB Bank
+600,Keroka,KCB Bank
+601,Kilgoris,KCB Bank
+602,Kimilili,KCB Bank
+603,Litein,KCB Bank
+604,Londiani Branch,KCB Bank
+605,Luanda,KCB Bank
+606,Malaba,KCB Bank
+607,Muhoroni,KCB Bank
+608,Oyugis,KCB Bank
+609,Ugunja,KCB Bank
+610,United Mall,KCB Bank
+611,Serem,KCB Bank
+612,Sondu,KCB Bank
+613,Kisumu West,KCB Bank
+614,Marigat,KCB Bank
+615,Mois Bridge,KCB Bank
+616,Mashariki,KCB Bank
+617,Naro Moro,KCB Bank
+618,Kiriaini,KCB Bank
+619,Egerton University,KCB Bank
+620,Maua,KCB Bank
+621,Kawangare,KCB Bank
+622,Kimathi,KCB Bank
+623,Namanga,KCB Bank
+624,Gikomba,KCB Bank
+625,Kwale,KCB Bank
+626,Prestige Plaza,KCB Bank
+627,Kariobangi,KCB Bank
+628,Biashara Street,KCB Bank
+629,Ngara,KCB Bank
+630,Kyuso,KCB Bank
+631,Masii,KCB Bank
+632,Menengai Crater,KCB Bank
+633,Town Centre,KCB Bank
+634,Makindu,KCB Bank
+635,Rongo,KCB Bank
+636,Isibania,KCB Bank
+637,Kiserian,KCB Bank
+638,Mwembe Tayari,KCB Bank
+639,Kisauni,KCB Bank
+640,Haile Selassie,KCB Bank
+641,Salama House Mortgage Centre,KCB Bank
+642,Garden Plaza,KCB Bank
+643,Sarit Centre Mortgage Centre,KCB Bank
+644,Cpc Bulk Corporate Cheques,KCB Bank
+645,Trade Services,KCB Bank
+646,Nairobi High Court,KCB Bank
+647,Mombasa High Court,KCB Bank
+648,Kisumu Airport,KCB Bank
+649,Port Victoria,KCB Bank
+650,Moi International Airport,KCB Bank
+651,Nyali,KCB Bank
+652,Westgate Advantage,KCB Bank
+653,Diaspora,KCB Bank
+654,Kisii West,KCB Bank
+655,Mbita,KCB Bank
+656,Sori,KCB Bank
+657,Hurlingham,KCB Bank
+658,Kibera,KCB Bank
+659,Thika Road Mall Branch,KCB Bank
+660,Kasarani Branch,KCB Bank
+661,KCB Maasai Mara,KCB Bank
+662,KCB Kabartonjo,KCB Bank
+663,KCB Eldoret East,KCB Bank
+664,Kikima,KCB Bank
+665,KCB JKUAT,KCB Bank
+666,KCB Changamwe,KCB Bank
+667,KCB Makongeni,KCB Bank
+668,KCB Syokimau,KCB Bank
+669,KCB Moi Referral Hospital,KCB Bank
+670,KCB Kitale Advantage,KCB Bank
+671,KCB Lavington,KCB Bank
+672,KCB ICD Kibarani,KCB Bank
+673,KCB Riverside Advantage,KCB Bank
+674,KCB Gigiri Square,KCB Bank
+675,Kayole,KCB Bank
+676,Garden City,KCB Bank
+677,JKIA,KCB Bank
+678,Makutano,KCB Bank
+679,Kericho East,KCB Bank
+680,Westlands,UBA Bank
+681,Enterprise Road,UBA Bank
+682,Upper Hill,UBA Bank
+683,Head Office,UBA Bank
+684,Head Office,SBM Bank
+685,City Centre Branch,SBM Bank
+686,Village Market,SBM Bank
+687,Mombasa Moi Avenue,SBM Bank
+688,Hurlingham,SBM Bank
+689,Eastleigh,SBM Bank
+690,Parklands,SBM Bank
+691,Riverside Mews,SBM Bank
+692,Thika,SBM Bank
+693,Nakuru,SBM Bank
+694,Donholm,SBM Bank
+695,Bondeni,SBM Bank
+696,Ngara Mini,SBM Bank
+697,Kisumu,SBM Bank
+698,Eldoret,SBM Bank
+699,Diamond Plaza,SBM Bank
+700,Windsor,SBM Bank
+701,Malindi,SBM Bank
+702,Embakasi,SBM Bank
+703,Upper Hill,SBM Bank
+704,Nyali,SBM Bank
+705,Buru Buru,SBM Bank
+706,Strathmore,SBM Bank
+707,Kisii,SBM Bank
+708,Virtual,SBM Bank
+709,Rafiki DTM Clearing Center,SBM Bank
+710,Chase Xpress – Ngong Road,SBM Bank
+711,Chase Elite ABC Place,SBM Bank
+712,Sameer Business Park,SBM Bank
+713,Mtwapa,SBM Bank
+714,Ongata Rongai,SBM Bank
+715,Westlands,SBM Bank
+716,Machakos,SBM Bank
+717,Mombasa Old Town,SBM Bank
+718,River Road,SBM Bank
+719,Lunga Lunga,SBM Bank
+720,Chase Xpress Dagoretti Corner,SBM Bank
+721,Chase Xpress Madaraka Corner,SBM Bank
+722,Kitale,SBM Bank
+723,Kimathi,SBM Bank
+724,Narok,SBM Bank
+725,SACCO Processing Centre,SBM Bank
+726,Garissa,SBM Bank
+727,KPA,SBM Bank
+728,Lavington,SBM Bank
+729,Kericho,SBM Bank
+730,Karen,SBM Bank
+731,Kilimani,SBM Bank
+732,Kasuku Centre,SBM Bank
+733,Kilifi,SBM Bank
+734,Kisumu Naivas,SBM Bank
+735,Ruaka,SBM Bank
+736,Garden City,SBM Bank
+737,Xpress Jomvu,SBM Bank
+738,Xpress Kitengela,SBM Bank
+739,Kayole,SBM Bank
+740,Xpress Limuru Road,SBM Bank
+741,Xpress Pangani,SBM Bank
+742,Xpress Nakuru,SBM Bank
+743,Xpress Eldoret,SBM Bank
+744,Ngong Milele,SBM Bank
+745,Corner House,SBM Bank
+746,Eastleigh III,SBM Bank
+747,Westlands,SBM Bank
+748,Industrial Area,SBM Bank
+749,Diani,SBM Bank
+750,Mombasa,SBM Bank
+751,Kilimani,SBM Bank
+752,City Centre,SBM Bank
+753,Malindi,SBM Bank
+754,Nyali,SBM Bank
+755,Sameer,SBM Bank
+756,Highridge,SBM Bank
+757,New Muthaiga,SBM Bank
+758,Changamwe,SBM Bank
+759,Garden City,SBM Bank
+760,Card Centre,SBM Bank
+761,Gikomba Xpress,SBM Bank
+762,Jubilee Arcade Branch,SBM Bank
+763,Head Office – IPS Clearing Centre,SBM Bank
+764,Kenyatta Avenue,I&M Bank
+765,Sarit Centre,I&M Bank
+766,Head Office,I&M Bank
+767,Biashara St,I&M Bank
+768,Mombasa,I&M Bank
+769,Industrial Area,I&M Bank
+770,Kisumu,I&M Bank
+771,Karen,I&M Bank
+772,Panari Centre,I&M Bank
+773,Parklands,I&M Bank
+774,Wilson Airport,I&M Bank
+775,Ongata Rongai,I&M Bank
+776,South C Shopping Centre,I&M Bank
+777,Nyali Cinemax,I&M Bank
+778,Langata Link,I&M Bank
+779,Valley Arcade,I&M Bank
+780,Eldoret,I&M Bank
+781,NAKURU,I&M Bank
+782,Riverside Drive Branch,I&M Bank
+783,Kisii,I&M Bank
+784,Changamwe,I&M Bank
+785,Malindi,I&M Bank
+786,Nyeri,I&M Bank
+787,Thika,I&M Bank
+788,Gigiri,I&M Bank
+789,Mtwapa,I&M Bank
+790,Lavington Mall,I&M Bank
+791,Kitale,I&M Bank
+792,Lunga Lunga,I&M Bank
+793,Yaya Centre,I&M Bank
+794,"Gateway Mall, Syokimau",I&M Bank
+795,Garden City Mall,I&M Bank
+796,Cross Road Off River Road,I&M Bank
+797,Nanyuki,I&M Bank
+798,Spring Valley,I&M Bank
+799,Meru,I&M Bank
+800,Eldama Park,I&M Bank
+801,Banda Street,I&M Bank
+802,Dunga Road,I&M Bank
+803,Ridge Court,I&M Bank
+804,Bandari Plaza,I&M Bank
+805,"Mombasa, Moi Avenue",I&M Bank
+806,Card Center,I&M Bank
+807,Central Business Unit,National Bank
+808,Kenyatta Avenue,National Bank
+809,Harambee Avenue,National Bank
+810,Hill,National Bank
+811,Busia,National Bank
+812,Kiambu,National Bank
+813,Meru,National Bank
+814,Karatina,National Bank
+815,Narok,National Bank
+816,Kisii,National Bank
+817,Malindi,National Bank
+818,Nyeri,National Bank
+819,Kitale,National Bank
+820,Eastleigh,National Bank
+821,Limuru,National Bank
+822,Kitui,National Bank
+823,Molo,National Bank
+824,Bungoma,National Bank
+825,Nkrumah,National Bank
+826,Kapsabet,National Bank
+827,Awendo,National Bank
+828,Portway-msa,National Bank
+829,Hospital Br.,National Bank
+830,Ruiru,National Bank
+831,Ongata Rongai,National Bank
+832,Embu,National Bank
+833,Kakamega,National Bank
+834,Nakuru,National Bank
+835,Ukunda,National Bank
+836,Upper Hill,National Bank
+837,Nandi Hills,National Bank
+838,Migori,National Bank
+839,Westlands,National Bank
+840,Times Tower,National Bank
+841,Maua,National Bank
+842,WILSON AIRPORT,National Bank
+843,J.K.I.A.,National Bank
+844,Eldoret,National Bank
+845,MOIS BRIDGE,National Bank
+846,MUTOMO,National Bank
+847,KIANJAI,National Bank
+848,KENYATTA UNIVERSITY,National Bank
+849,ST PAULS UNIVERSITY,National Bank
+850,MOI UNIVERSITY ELDORET,National Bank
+851,MOI INT AIRPORT MOMBASA,National Bank
+852,Machakos,National Bank
+853,Kitengela,National Bank
+854,Kisumu,National Bank
+855,Mtwapa,National Bank
+856,Changamwe,National Bank
+857,Garissa,National Bank
+858,Thika,National Bank
+859,Momasa Polytechnic University College,National Bank
+860,Bomet,National Bank
+861,Greenspan,National Bank
+862,Sameer Park,National Bank
+863,SEKU,National Bank
+864,Ngong Road,National Bank
+865,Moi Avenue,National Bank
+866,Mountain Mall,National Bank
+867,Nyali Centre,National Bank
+868,Kilifi,National Bank
+869,South C Branch- KEBS,National Bank
+870,Kericho,National Bank
+871,Isiolo,National Bank
+872,South C – Red Cross,National Bank
+873,National Bank Premium Banking Kisumu,National Bank
+874,Yaya Centre,National Bank
+875,Gigiri,National Bank
+876,Nanyuki,National Bank
+877,Wote,National Bank
+878,Lodwar,National Bank
+879,Gikomba,National Bank
+880,Wajir,National Bank
+881,Bondeni,National Bank
+882,Lunga Lunga,National Bank
+883,Mandera,National Bank
+884,Card Centre,National Bank
+885,Head Office,National Bank
+886,Central CLearing Centre,National Bank
+887,Head Office,National Bank
+888,Card Centre,National Bank
+889,Eastleigh,National Bank
+890,Kenyatta Ave,National Bank
+891,Wajir,National Bank
+892,Bondeni,National Bank
+893,Garissa,National Bank
+894,Mandera,National Bank
+895,Isiolo,National Bank
+896,Awendo,National Bank
+897,Bomet,National Bank
+898,Bungoma,National Bank
+899,Busia,National Bank
+900,Changamwe,National Bank
+901,Eldoret,National Bank
+902,Embu,National Bank
+903,Gigiri,National Bank
+904,Greenspan,National Bank
+905,Harambee Ave,National Bank
+906,Hill,National Bank
+907,Hospital,National Bank
+908,JKIA,National Bank
+909,Kakamega,National Bank
+910,Kapsabet,National Bank
+911,Karatina,National Bank
+912,Kenyatta Ave,National Bank
+913,Kenyatta University,National Bank
+914,Kericho,National Bank
+915,Kiambu,National Bank
+916,Kianjai,National Bank
+917,Kilifi,National Bank
+918,Kisii,National Bank
+919,Kisumu,National Bank
+920,Kisumu Premium Centre,National Bank
+921,Kitale,National Bank
+922,Kitengela,National Bank
+923,Kitui,National Bank
+924,Limuru,National Bank
+925,Lunga Lunga,National Bank
+926,Machakos,National Bank
+927,Malindi,National Bank
+928,Maua,National Bank
+929,Meru,National Bank
+930,Migori,National Bank
+931,Moi Avenue,National Bank
+932,Moi University Eldoret,National Bank
+933,Mois Bridge,National Bank
+934,Molo,National Bank
+935,Mountain Mall,National Bank
+936,Mtwapa,National Bank
+937,Mutomo,National Bank
+938,Nakuru,National Bank
+939,Nandi Hills,National Bank
+940,Narok,National Bank
+941,Ngong Rd,National Bank
+942,Nkuruma,National Bank
+943,Nyali,National Bank
+944,Nyeri,National Bank
+945,Ongata Rongai,National Bank
+946,Portway Hse,National Bank
+947,Ruiru,National Bank
+948,Sameer Park,National Bank
+949,SEKU,National Bank
+950,South C Red Cross,National Bank
+951,St. Pauls University,National Bank
+952,Technical Univ of MSA,National Bank
+953,Thika,National Bank
+954,Times Tower,National Bank
+955,TSC Upper Hill Building,National Bank
+956,Ukunda,National Bank
+957,Westlands,National Bank
+958,Wilson Airport NRI,National Bank
+959,Yaya Centre,National Bank
+960,DTB BUNGOMA BRANCH,Diamond Trust Bank
+961,DTB BURUBURU BRANCH,Diamond Trust Bank
+962,DTB BUSIA BRANCH,Diamond Trust Bank
+963,DTB CAPITAL CENTRE BRANCH,Diamond Trust Bank
+964,DTB CHANGAMWE BRANCH,Diamond Trust Bank
+965,DTB COURTYARD BRANCH,Diamond Trust Bank
+966,DTB CROSS ROADS BRANCH,Diamond Trust Bank
+967,DTB DIAMOND PLAZA,Diamond Trust Bank
+968,DTB DIANI BRANCH,Diamond Trust Bank
+969,DTB CENTRE BRANCH,Diamond Trust Bank
+970,DTB ELDORET BRANCH,Diamond Trust Bank
+971,DTB EMBU BRANCH,Diamond Trust Bank
+972,DTB FUNZI ROAD,Diamond Trust Bank
+973,DTB IMAARA MALL BRANCH,Diamond Trust Bank
+974,DTB INDUSTRIAL AREA BRANCH,Diamond Trust Bank
+975,DTB JKIA (AIRPORT) BRANCH,Diamond Trust Bank
+976,DTB JOMO KENYATTA BRANCH,Diamond Trust Bank
+977,DTB KAHAWA SUKARI BRANCH,Diamond Trust Bank
+978,DTB KAKAMEGA BRANCH,Diamond Trust Bank
+979,DTB KAMAKIS BRANCH,Diamond Trust Bank
+980,DTB KAREN BRANCH,Diamond Trust Bank
+981,DTB KERICHO BRANCH,Diamond Trust Bank
+982,DTB KILIFI BRANCH,Diamond Trust Bank
+983,DTB KISII BRANCH,Diamond Trust Bank
+984,DTB KISUMU BRANCH,Diamond Trust Bank
+985,DTB KISUMU WEST END MALL BRANCH,Diamond Trust Bank
+986,DTB KITALE BRANCH,Diamond Trust Bank
+987,DTB KITENGELA BRANCH,Diamond Trust Bank
+988,DTB KOINANGE STREET BRANCH,Diamond Trust Bank
+989,DTB LAMU BRANCH,Diamond Trust Bank
+990,DTB LAVINGTON BRANCH,Diamond Trust Bank
+991,DTB MACHAKOS BRANCH,Diamond Trust Bank
+992,DTB MADINA MALL BRANCH,Diamond Trust Bank
+993,DTB MALINDI BRANCH,Diamond Trust Bank
+994,DTB MARIAKANI BRANCH,Diamond Trust Bank
+995,DTB MERU BRANCH,Diamond Trust Bank
+996,DTB MIGORI BRANCH,Diamond Trust Bank
+997,DTB MOMBASA BRANCH,Diamond Trust Bank
+998,DTB MTWAPA BRANCH,Diamond Trust Bank
+999,DTB MWANZI ROAD BRANCH,Diamond Trust Bank
+1000,DTB NAKURU BIASHARA STREET,Diamond Trust Bank
+1001,DTB NAKURU BRANCH,Diamond Trust Bank
+1002,DTB NAROK BRANCH,Diamond Trust Bank
+1003,DTB NATION CENTRE BRANCH,Diamond Trust Bank
+1004,DTB NKRUMAH ROAD BRANCH,Diamond Trust Bank
+1005,DTB NYALI BRANCH,Diamond Trust Bank
+1006,DTB NYERI BRANCH,Diamond Trust Bank
+1007,DTB OTC BRANCH,Diamond Trust Bank
+1008,DTB PARKLANDS BRANCH,Diamond Trust Bank
+1009,DTB PRESTIGE PLAZA BRANCH,Diamond Trust Bank
+1010,DTB RIVAAN BRANCH,Diamond Trust Bank
+1011,DTB RIVERSIDE BRANCH,Diamond Trust Bank
+1012,DTB RONALD NGALA BRANCH,Diamond Trust Bank
+1013,DTB SHIMANZI BRANCH,Diamond Trust Bank
+1014,DTB SOUTH C BRANCH,Diamond Trust Bank
+1015,DTB T-MALL BRANCH,Diamond Trust Bank
+1016,DTB THIKA BRANCH,Diamond Trust Bank
+1017,DTB THIKA ROAD MALL BRANCH,Diamond Trust Bank
+1018,DTB UPPERHILL BRANCH,Diamond Trust Bank
+1019,DTB VILLAGE MARKET BRANCH,Diamond Trust Bank
+1020,DTB VOI BRANCH,Diamond Trust Bank
+1021,DTB WABERA STREET BRANCH,Diamond Trust Bank
+1022,DTB WATAMU BRANCH,Diamond Trust Bank
+1023,DTB WESTGATE BRANCH,Diamond Trust Bank
+1024,ELDORET,Standard Chartered Bank
+1025,KERICHO,Standard Chartered Bank
+1026,KISUMU,Standard Chartered Bank
+1027,KITALE,Standard Chartered Bank
+1028,TREASURY SQUARE,Standard Chartered Bank
+1029,KILINDINI,Standard Chartered Bank
+1030,KENYATTA AVENUE,Standard Chartered Bank
+1031,MOI AVENUE,Standard Chartered Bank
+1032,NAKURU,Standard Chartered Bank
+1033,NANYUKI,Standard Chartered Bank
+1034,NYERI,Standard Chartered Bank
+1035,THIKA,Standard Chartered Bank
+1036,WESTLANDS,Standard Chartered Bank
+1037,MACHAKOS,Standard Chartered Bank
+1038,MERU,Standard Chartered Bank
+1039,HARAMBEE AVENUE,Standard Chartered Bank
+1040,KIAMBU,Standard Chartered Bank
+1041,INDUSTRIAL AREA,Standard Chartered Bank
+1042,KAKAMEGA,Standard Chartered Bank
+1043,MALINDI,Standard Chartered Bank
+1044,GATUNDU,Standard Chartered Bank
+1045,LAMU,Standard Chartered Bank
+1046,OLD MUTUAL,Standard Chartered Bank
+1047,KABARNET,Standard Chartered Bank
+1048,ELDORET,Standard Chartered Bank
+1049,YAYA CENTRE BRANCH,Standard Chartered Bank
+1050,RUARAKA,Standard Chartered Bank
+1051,LANGATA,Standard Chartered Bank
+1052,MAKUPA,Standard Chartered Bank
+1053,KAREN,Standard Chartered Bank
+1054,MUTHAIGA,Standard Chartered Bank
+1055,C.O.U,Standard Chartered Bank
+1056,UKAY,Standard Chartered Bank
+1057,EASTLEIGH,Standard Chartered Bank
+1058,KISII,Standard Chartered Bank
+1059,UPPER HILL,Standard Chartered Bank
+1060,NYALI,Standard Chartered Bank
+1061,CFC Stanbic Head Office,Stanbic Bank
+1062,Kenyatta Ave,Stanbic Bank
+1063,Digo road,Stanbic Bank
+1064,Waiyaki Way,Stanbic Bank
+1065,Industrial Area,Stanbic Bank
+1066,Harambee Avenue,Stanbic Bank
+1067,Chiromo Road,Stanbic Bank
+1068,International House,Stanbic Bank
+1069,Upper Hill,Stanbic Bank
+1070,Naivasha,Stanbic Bank
+1071,Westgate,Stanbic Bank
+1072,Kisumu,Stanbic Bank
+1073,Nakuru,Stanbic Bank
+1074,Thika,Stanbic Bank
+1075,Nanyuki,Stanbic Bank
+1076,Meru,Stanbic Bank
+1077,Buruburu,Stanbic Bank
+1078,Gikomba,Stanbic Bank
+1079,Garden city,Stanbic Bank
+1080,Eldoret,Stanbic Bank
+1081,Karen,Stanbic Bank
+1082,Kisii,Stanbic Bank
+1083,Warwick,Stanbic Bank
+1084,Private Clients,Stanbic Bank
+1085,Nyali,Stanbic Bank
+1086,Malindi,Stanbic Bank
+1087,Changamwe,Stanbic Bank
+1088,The Hub,Stanbic Bank
+1089,Two Rivers,Stanbic Bank
+1090,Central Processing H/o,Stanbic Bank
+1091,Head Office,NCBA Bank
+1092,Upper Hill,NCBA Bank
+1093,Wabera Street,NCBA Bank
+1094,Mama Ngina,NCBA Bank
+1095,Westlands Branch,NCBA Bank
+1096,Industrial Area,NCBA Bank
+1097,Mamlaka,NCBA Bank
+1098,Village Market,NCBA Bank
+1099,Cargo Centre,NCBA Bank
+1100,Park Side,NCBA Bank
+1101,Galleria Mall,NCBA Bank
+1102,Junction,NCBA Bank
+1103,Thika Road Mall,NCBA Bank
+1104,Greenspan Mall,NCBA Bank
+1105,Moi Avenue Mombasa,NCBA Bank
+1106,Meru,NCBA Bank
+1107,Nakuru,NCBA Bank
+1108,Nyali,NCBA Bank
+1109,Diani,NCBA Bank
+1110,Changamwe,NCBA Bank
+1111,Eldoret,NCBA Bank
+1112,Kisumu,NCBA Bank
+1113,Thika,NCBA Bank
+1114,Nanyuki,NCBA Bank
+1115,Yaya Centre,NCBA Bank
+1116,Lavington,NCBA Bank
+1117,Machakos,NCBA Bank
+1118,Kirinyaga road,NCBA Bank
+1119,Karen Hub,NCBA Bank
+1120,Garden City,NCBA Bank
+1121,Two Rivers Mall,NCBA Bank
+1122,City Centre,NCBA Bank
+1123,NIC House,NCBA Bank
+1124,Harbour House,NCBA Bank
+1125,Head Office-Fargo,NCBA Bank
+1126,Westlands,NCBA Bank
+1127,The Junction Br.,NCBA Bank
+1128,Nakuru,NCBA Bank
+1129,Nyali,NCBA Bank
+1130,Nkrumah Road,NCBA Bank
+1131,Harambee,NCBA Bank
+1132,Prestige-Ngong Road,NCBA Bank
+1133,Kisumu,NCBA Bank
+1134,Thika,NCBA Bank
+1135,Meru,NCBA Bank
+1136,Galleria (Bomas),NCBA Bank
+1137,Eldoret,NCBA Bank
+1138,Village Market,NCBA Bank
+1139,Sameer Park,NCBA Bank
+1140,Karen,NCBA Bank
+1141,Taj Mall,NCBA Bank
+1142,ABC,NCBA Bank
+1143,Thika Road Mall,NCBA Bank
+1144,Changamwe Branch,NCBA Bank
+1145,Kenyatta Avenue,NCBA Bank
+1146,Riverside,NCBA Bank
+1147,Machakos,NCBA Bank
+1148,Lunga Lunga Square,NCBA Bank
+1149,Kilimani,NCBA Bank
+1150,Kitengela,NCBA Bank
+1151,Kisii,NCBA Bank
+1152,KMA Centre,NCBA Bank
+1153,Buru Buru,NCBA Bank
+1154,"CPA Centre, Ruaraka",NCBA Bank
+1155,Rongai,NCBA Bank
+1156,Rosslyn Riviera,NCBA Bank
+1157,Ciata Mall,NCBA Bank
+1158,Parklands,NCBA Bank
+1159,Nanyuki,NCBA Bank
+1160,Malindi,NCBA Bank
+1161,Kilifi,NCBA Bank
+1162,Watamu,NCBA Bank
+1163,Diani,NCBA Bank
+1164,Kitale,NCBA Bank
+1165,Narok Branch,NCBA Bank
+1166,Lavington Branch,NCBA Bank
+1167,Head Office,Faulu Microfinance Bank Limited
+1168,OTC Branch,Faulu Microfinance Bank Limited
+1169,Kayole Branch,Faulu Microfinance Bank Limited
+1170,Ngong Road Branch,Faulu Microfinance Bank Limited
+1171,Kariobangi Branch,Faulu Microfinance Bank Limited
+1172,Kawangware Branch,Faulu Microfinance Bank Limited
+1173,Githurai Branch,Faulu Microfinance Bank Limited
+1174,Kimathi Street Branch,Faulu Microfinance Bank Limited
+1175,Moi Avenue Branch,Faulu Microfinance Bank Limited
+1176,Thika Branch,Faulu Microfinance Bank Limited
+1177,Rongai Branch,Faulu Microfinance Bank Limited
+1178,Meru Branch,Faulu Microfinance Bank Limited
+1179,Nyeri Branch,Faulu Microfinance Bank Limited
+1180,Nakuru Branch,Faulu Microfinance Bank Limited
+1181,Eldoret Branch,Faulu Microfinance Bank Limited
+1182,Kisumu Branch,Faulu Microfinance Bank Limited
+1183,Kakamega Branch,Faulu Microfinance Bank Limited
+1184,Bungoma Branch,Faulu Microfinance Bank Limited
+1185,Machakos Branch,Faulu Microfinance Bank Limited
+1186,Kitui Branch,Faulu Microfinance Bank Limited
+1187,Mwingi Branch,Faulu Microfinance Bank Limited
+1188,Mombasa Branch,Faulu Microfinance Bank Limited
+1189,Malindi Branch,Faulu Microfinance Bank Limited
+1190,Ukunda Branch,Faulu Microfinance Bank Limited
+1191,Busia Branch,Faulu Microfinance Bank Limited
+1192,Kericho Branch,Faulu Microfinance Bank Limited
+1193,Voi Branch,Faulu Microfinance Bank Limited
+1194,Kapenguria Branch,Faulu Microfinance Bank Limited
+1195,Emali Branch,Faulu Microfinance Bank Limited
+1196,Iten Branch,Faulu Microfinance Bank Limited
+1197,Naivasha Branch,Faulu Microfinance Bank Limited
+1198,Kilifi Branch,Faulu Microfinance Bank Limited
+1199,Homabay Branch,Faulu Microfinance Bank Limited
+1200,"Adams Arcade, Nairobi",Postbank
+1201,"Afya House, Nairobi",Postbank
+1202,Athi River,Postbank
+1203,Bomet,Postbank
+1204,Bondo,Postbank
+1205,Bungoma,Postbank
+1206,Busia,Postbank
+1207,"Canon House, Nairobi",Postbank
+1208,Chaani,Postbank
+1209,Chuka,Postbank
+1210,Eastleigh,Postbank
+1211,Eldama Ravine,Postbank
+1212,Eldoret,Postbank
+1213,Emali,Postbank
+1214,Embu,Postbank
+1215,Enterprise Road,Postbank
+1216,Garissa,Postbank
+1217,Gilgil,Postbank
+1218,Githurai,Postbank
+1219,Head Office,Postbank
+1220,Homa Bay,Postbank
+1221,Isiolo,Postbank
+1222,Iten,Postbank
+1223,Kabarnet,Postbank
+1224,Kajiado,Postbank
+1225,Kakamega,Postbank
+1226,Kangundo,Postbank
+1227,Kapenguria,Postbank
+1228,Kapsabet,Postbank
+1229,Karatina,Postbank
+1230,Karen,Postbank
+1231,Kariobangi,Postbank
+1232,Karuri,Postbank
+1233,Kawangware,Postbank
+1234,Kehancha,Postbank
+1235,Kericho,Postbank
+1236,Keroka,Postbank
+1237,Keruguya,Postbank
+1238,Kiambu,Postbank
+1239,Kibwezi,Postbank
+1240,Kikuyu,Postbank
+1241,Kilifi,Postbank
+1242,Kisauni,Postbank
+1243,Kisii,Postbank
+1244,Kisumu,Postbank
+1245,Kitale,Postbank
+1246,Kitengela,Postbank
+1247,Kitui,Postbank
+1248,Likoni,Postbank
+1249,Limuru,Postbank
+1250,Lodwar,Postbank
+1251,Luanda,Postbank
+1252,Machakos,Postbank
+1253,Makueni,Postbank
+1254,Malindi,Postbank
+1255,Maralal,Postbank
+1256,Mariakani,Postbank
+1257,Marsabit,Postbank
+1258,Matuu,Postbank
+1259,Maua,Postbank
+1260,Mbale,Postbank
+1261,Mbita,Postbank
+1262,Meru,Postbank
+1263,Mlolongo,Postbank
+1264,"Moi Avenue, Mombasa",Postbank
+1265,Molo,Postbank
+1266,Mtwapa,Postbank
+1267,Mumias,Postbank
+1268,Murang'a,Postbank
+1269,Mwea,Postbank
+1270,Mwingi,Postbank
+1271,"NACICO House, Nairobi",Postbank
+1272,Naivasha,Postbank
+1273,Nakuru,Postbank
+1274,Nandi Hills,Postbank
+1275,Nanyuki,Postbank
+1276,Narok,Postbank
+1277,"Ngara Road, Nairobi",Postbank
+1278,Ngong,Postbank
+1279,Nyahururu,Postbank
+1280,Nyamira,Postbank
+1281,Nyeri,Postbank
+1282,Ongata Rongai,Postbank
+1283,Oyugis,Postbank
+1284,Ruiru,Postbank
+1285,Sare Awendo,Postbank
+1286,"Savani House, Mombasa",Postbank
+1287,Siaya,Postbank
+1288,Suna Migori,Postbank
+1289,Taveta,Postbank
+1290,Thika,Postbank
+1291,Ukunda,Postbank
+1292,Uthiru,Postbank
+1293,Viwandani,Postbank
+1294,Voi,Postbank
+1295,Watamu,Postbank
+1296,Webuye,Postbank
+1297,Westlands,Postbank

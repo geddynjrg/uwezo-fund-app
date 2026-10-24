@@ -50,6 +50,74 @@ export default defineConfig({
   ],
   server: {
     host: true,
-    port: 5175,
+    port: 4173,
+    proxy: {
+      '/api/businesses': { target: 'https://majuu.uwezo.go.ke', changeOrigin: true, secure: true },
+      '/api/agencies': { target: 'https://majuu.uwezo.go.ke', changeOrigin: true, secure: true },
+      '/msea-api': {
+        target: 'https://msea.ecitizen.go.ke',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/msea-api/, '/api'),
+      },
+      '/zimbra-account': {
+        target: 'https://mail.govmail.ke',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/zimbra-account/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('referer');
+          });
+        },
+      },
+      '/zimbra-admin': {
+        target: 'https://mail.govmail.ke:9071',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/zimbra-admin/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('referer');
+          });
+        },
+      },
+    },
+  },
+  preview: {
+    host: true,
+    port: 4173,
+    proxy: {
+      '/api/businesses': { target: 'https://majuu.uwezo.go.ke', changeOrigin: true, secure: true },
+      '/api/agencies': { target: 'https://majuu.uwezo.go.ke', changeOrigin: true, secure: true },
+      '/msea-api': {
+        target: 'https://msea.ecitizen.go.ke',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/msea-api/, '/api'),
+      },
+      '/zimbra-account': {
+        target: 'https://mail.govmail.ke',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/zimbra-account/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('referer');
+          });
+        },
+      },
+      '/zimbra-admin': {
+        target: 'https://mail.govmail.ke:9071',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/zimbra-admin/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('referer');
+          });
+        },
+      },
+    },
   },
 });

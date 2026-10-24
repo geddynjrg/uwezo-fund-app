@@ -10,8 +10,8 @@ android {
         applicationId "ke.go.uwezo.fundapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 15
-        versionName "1.1.13"
+        versionCode 29
+        versionName "1.1.25"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -19,9 +19,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    def releaseProps = new Properties()
+    def releasePropsFile = rootProject.file("local.properties")
+    if (releasePropsFile.exists()) releaseProps.load(new FileInputStream(releasePropsFile))
+    signingConfigs {
+        release {
+            if (releaseProps.getProperty("release.storeFile")) {
+                storeFile rootProject.file(releaseProps.getProperty("release.storeFile"))
+                storePassword releaseProps.getProperty("release.storePassword")
+                keyAlias releaseProps.getProperty("release.keyAlias")
+                keyPassword releaseProps.getProperty("release.keyPassword")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            if (releaseProps.getProperty("release.storeFile")) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

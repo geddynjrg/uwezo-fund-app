@@ -1,6 +1,6 @@
 {
-  "versionCode": 15,
-  "versionName": "1.1.13",
+  "versionCode": 29,
+  "versionName": "1.1.25",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Sign-in uses the Uwezo theme color from the loans site footer."
+  "notes": "Loan application and Wezesha Majuu open on the phone when the websites are down. The amount applied is the budget total, up to KES 166,666. Guarantor confirmation, job placement, and the Majuu upload run when the phone is online."
 }

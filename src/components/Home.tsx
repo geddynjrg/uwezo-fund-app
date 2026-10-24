@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
+import type { PortalAvailability, PortalId } from '../lib/portalStatus';
 import type { AppSession } from '../lib/session';
 import {
   getNativeVersion,
@@ -14,13 +15,15 @@ type HomeProps = {
   onOpenAccount: () => void;
   onOpenNotifications: () => void;
   onOpenAuthenticator: () => void;
+  onOpenOffline: (portal: PortalId) => void;
+  portals: PortalAvailability;
   session?: AppSession | null;
   showStaging?: boolean;
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.1.10';
+const PACKAGE_VERSION = '1.1.25';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -37,6 +40,8 @@ export function Home({
   onOpenAccount,
   onOpenNotifications,
   onOpenAuthenticator,
+  onOpenOffline,
+  portals,
   session = null,
   showStaging = false,
 }: HomeProps) {
@@ -114,6 +119,14 @@ export function Home({
     };
   }, []);
 
+  async function openDestination(link: (typeof primaryLinks)[number]) {
+    if (link.id === 'majuu' || link.id === 'loans') {
+      onOpenOffline(link.id);
+      return;
+    }
+    await openExternal(link.url);
+  }
+
   return (
     <main className="home">
       <header className="home-hero">
@@ -146,11 +159,18 @@ export function Home({
             key={link.id}
             type="button"
             className="link-card"
-            onClick={() => void openExternal(link.url)}
+            onClick={() => void openDestination(link)}
           >
             <span className="link-card__title">{link.title}</span>
             <span className="link-card__sub">{link.subtitle}</span>
             <span className="link-card__url">{link.url.replace(/^https:\/\//, '')}</span>
+            {link.id === 'loans' || link.id === 'majuu' ? (
+              <span className="link-card__sub">
+                {portals[link.id] === false
+                  ? 'The site is not answering. This phone still uses its own application steps.'
+                  : 'Uses the application steps saved in this app.'}
+              </span>
+            ) : null}
           </button>
         ))}
 
