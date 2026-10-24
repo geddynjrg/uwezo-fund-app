@@ -797,8 +797,9 @@ function BankFields({
   branches: BankBranches;
   onChange: (patch: { bankName?: string; bankBranch?: string; accountName?: string; accountNumber?: string }) => void;
 }) {
-  const [useOther, setUseOther] = useState(() => Boolean(bankName) && !GROUP_BANKS.includes(bankName));
-  const knownBank = !useOther && GROUP_BANKS.includes(bankName);
+  const knownBanks: readonly string[] = GROUP_BANKS;
+  const [useOther, setUseOther] = useState(() => Boolean(bankName) && !knownBanks.includes(bankName));
+  const knownBank = !useOther && knownBanks.includes(bankName);
   const selectValue = useOther ? 'Other' : bankName;
   const options = knownBank ? branches[bankName] || [] : [];
   return (
@@ -810,7 +811,7 @@ function BankFields({
           onChange={(event) => {
             if (event.target.value === 'Other') {
               setUseOther(true);
-              onChange({ bankName: GROUP_BANKS.includes(bankName) ? '' : bankName, bankBranch: '' });
+              onChange({ bankName: knownBanks.includes(bankName) ? '' : bankName, bankBranch: '' });
               return;
             }
             setUseOther(false);
