@@ -16,7 +16,9 @@ import {
   type LmsRole,
   type LmsRowAction,
 } from '../lib/lmsSync';
-import { syncLmsLocal } from '../lib/lmsOfflineSync';
+import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
+import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
+import { pendingMutationCount } from '../lib/lmsLocalDb';
 import { openLmsSession } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
@@ -51,26 +53,40 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [lmsOnline, setLmsOnline] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [override, setOverride] = useState<LmsPageView | null>(null);
-  const [showPhoneCopy, setShowPhoneCopy] = useState(false);
   const autoRefreshDone = useRef('');
   const autoOpened = useRef('');
   const autoDbSync = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
   const view = override || (current?.path ? cache?.pages[current.path] : null) || emptyView;
   const role = cache?.role || officer.role;
+  const showCompare = lmsOnline === true && pending > 0;
+  const vault = lmsDbVaultStatus(officer.email);
 
   useEffect(() => {
     let cancelled = false;
-    void probeOrigin('https://lms.uwezo.go.ke').then((online) => {
+    void (async () => {
+      const staff = loadStaffSession();
+      if (staff?.password && lmsDbVaultStatus(officer.email)) {
+        await openLmsDatabase(officer.email, staff.password);
+      }
+      const count = await pendingMutationCount(officer.email);
+      if (!cancelled) setPending(count);
+      const online = await probeOrigin('https://lms.uwezo.go.ke');
       if (!cancelled) setLmsOnline(online);
-    });
+      if (!cancelled && online && count > 0) {
+        const sent = await compareAndSendOfflineChanges(officer.email);
+        setNotice(sent.detail);
+        setPending(await pendingMutationCount(officer.email));
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [officer.email]);
 
   useEffect(() => {
     setOverride(null);
@@ -86,30 +102,31 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       }
       if (autoDbSync.current !== officer.email) {
         autoDbSync.current = officer.email;
-        void syncLmsLocal(officer.email).then((result) => {
+        void syncLmsLocal(officer.email).then(async (result) => {
           if (result.ok) setNotice(result.detail);
+          setPending(await pendingMutationCount(officer.email));
         });
       }
       return;
     }
     if (autoRefreshDone.current === officer.email) return;
     autoRefreshDone.current = officer.email;
-    void refreshPages().then(() => {
+    void refreshSession().then(() => {
       const next = loadLmsCache(officer.email);
       if (next?.cookie) {
         autoOpened.current = officer.email;
         void openLivePage(current?.path || '/dashboard');
         autoDbSync.current = officer.email;
-        void syncLmsLocal(officer.email).then((result) => {
+        void syncLmsLocal(officer.email).then(async (result) => {
           if (result.ok) setNotice(result.detail);
+          setPending(await pendingMutationCount(officer.email));
         });
       }
     });
-    // Pull session once, open live LMS, and sync constituency tables to the phone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [officer.email, lmsOnline]);
 
-  async function refreshPages() {
+  async function refreshSession() {
     const staff = loadStaffSession();
     if (!staff) return;
     setBusy(true);
@@ -123,9 +140,21 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         syncDetail: synced.detail,
       });
     }
-    setNotice(synced?.detail || 'Sign in again to download fresh LMS pages.');
+    setNotice(synced?.detail || 'Sign in again to refresh the LMS.');
     setRevision((value) => value + 1);
     setBusy(false);
+  }
+
+  async function refresh() {
+    setBusy(true);
+    await refreshSession();
+    const result = await refreshLmsConnection(officer.email, current?.path || '/dashboard');
+    setLmsOnline(result.online);
+    setPending(await pendingMutationCount(officer.email));
+    setNotice(result.detail);
+    setRevision((value) => value + 1);
+    setBusy(false);
+    if (result.online) void openLivePage(current?.path);
   }
 
   async function openLivePage(path?: string) {
@@ -133,16 +162,16 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     let cookie = cache?.cookie || loadLmsCache(officer.email)?.cookie || '';
     if (!cookie) {
       setNotice('Refreshing LMS sign-in…');
-      await refreshPages();
+      await refreshSession();
       cookie = loadLmsCache(officer.email)?.cookie || '';
     }
     if (!cookie) {
-      setNotice('Could not open the live LMS. Tap Refresh session, then try again.');
+      setNotice('Could not open the live LMS. Tap Refresh, then try again.');
       return;
     }
     const target = `${host}${path || current?.path || '/dashboard'}`;
     setBusy(true);
-    setNotice('Opening the live LMS…');
+    setNotice('Opening the same LMS screens as lms.uwezo.go.ke…');
     const opened = await openLmsSession(target, cookie);
     setBusy(false);
     if (!opened) {
@@ -150,7 +179,15 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       setNotice('Opened the LMS in the browser.');
       return;
     }
-    setNotice('Live LMS is open. Every website action works there. Use Back to return here.');
+    setNotice('Live LMS open — same UX/UI as the website. Use Android Back to return here.');
+  }
+
+  async function sendOfflineChanges() {
+    setBusy(true);
+    const result = await compareAndSendOfflineChanges(officer.email);
+    setBusy(false);
+    setNotice(result.detail);
+    setPending(await pendingMutationCount(officer.email));
   }
 
   async function runRowAction(action: LmsRowAction) {
@@ -212,6 +249,9 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           <strong>Uwezo Fund LMS</strong>
           <span>{officer.constituency || roleLabel(role)}</span>
         </div>
+        <button type="button" className="lms-menu-btn" disabled={busy} onClick={() => void refresh()}>
+          Refresh
+        </button>
         <button type="button" className="lms-menu-btn" onClick={() => { setSection('mail'); setMenuOpen(false); }}>
           Mail
         </button>
@@ -240,7 +280,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           ))}
           <button type="button" className="lms-link" onClick={() => { setSection('database'); setMenuOpen(false); }}>
             <small>Offline</small>
-            Phone LMS database
+            Encrypted LMS database
           </button>
           <button type="button" className="lms-link" onClick={() => { setSection('mail'); setMenuOpen(false); }}>
             <small>Mailbox</small>
@@ -274,6 +314,8 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             busy={busy}
             setBusy={setBusy}
             setNotice={setNotice}
+            onOnlineChange={setLmsOnline}
+            onPendingChange={setPending}
           />
         ) : section === 'password' ? (
           <form className="account-form" onSubmit={(event) => { event.preventDefault(); void changeMailboxPassword(); }}>
@@ -291,32 +333,41 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           </form>
         ) : (
           <>
-            <p className="lms-note">{notice || (lmsOnline === null ? 'Checking lms.uwezo.go.ke…' : officer.syncDetail)}</p>
+            <p className="lms-note">
+              {notice
+                || (lmsOnline === null
+                  ? 'Checking lms.uwezo.go.ke…'
+                  : lmsOnline
+                    ? `Online — same screens as lms.uwezo.go.ke.${pending ? ` ${pending} offline change(s) ready to send.` : ''}`
+                    : 'Offline — using the encrypted LMS database on this phone.')}
+            </p>
             <h1>{current?.title || 'LMS'}</h1>
             <p className="lms-lede">
-              Signed in as {officer.email}. {roleLabel(role)} — same screens and actions as lms.uwezo.go.ke.
+              Signed in as {officer.email}. Menu items open the live LMS UI when the server is reachable.
+              {vault ? ` Encrypted offline copy saved ${new Date(vault.savedAt).toLocaleString()}.` : ''}
               {officerCopyStatus(officer.email)?.savedAt
-                ? ` Officer details were encrypted on this phone ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()} and refresh after 15 days.`
+                ? ` Officer details encrypted ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()}.`
                 : ''}
             </p>
-            {lmsOnline ? (
-              <div className="doc-actions">
+            <div className="doc-actions">
+              {lmsOnline ? (
                 <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLivePage(current?.path)}>
-                  {busy ? 'Opening…' : `Open live ${current?.title || 'LMS'}`}
+                  {busy ? 'Opening…' : `Open ${current?.title || 'LMS'} (live UI)`}
                 </button>
-                <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refreshPages()}>
-                  Refresh session
-                </button>
-              </div>
-            ) : (
-              <p className="home-chat-note">Offline — showing the phone copy below. Connect to use every LMS action.</p>
-            )}
-            {lmsOnline ? (
-              <button type="button" className="btn-ghost" onClick={() => setShowPhoneCopy((value) => !value)}>
-                {showPhoneCopy ? 'Hide phone copy' : 'Show phone copy'}
+              ) : null}
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>
+                {busy ? 'Refreshing…' : 'Refresh'}
               </button>
-            ) : null}
-            {(showPhoneCopy || !lmsOnline) ? (
+              {showCompare ? (
+                <button type="button" className="btn-primary" disabled={busy} onClick={() => void sendOfflineChanges()}>
+                  {busy ? 'Sending…' : 'Compare with the LMS'}
+                </button>
+              ) : null}
+              <button type="button" className="btn-ghost" onClick={() => setSection('database')}>
+                Encrypted database
+              </button>
+            </div>
+            {!lmsOnline ? (
               <>
                 {view.summary.length ? (
                   <div className="lms-stats">
@@ -374,9 +425,8 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 ))}
                 {view.notes.map((note) => <p key={note}>{note}</p>)}
                 {!view.summary.length && !view.tables.length && !view.notes.length ? (
-                  <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'This page has no figures or rows yet. Tap Refresh session while online.'}</p>
+                  <p className="home-chat-note">Offline. Open Encrypted database, or tap Refresh when lms.uwezo.go.ke is back.</p>
                 ) : null}
-                {cache?.fetchedAt ? <p className="home-chat-note">Saved on this phone {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
                 {current?.path ? (
                   <LmsWork
                     key={current.path}
@@ -388,6 +438,8 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                     setBusy={setBusy}
                     setNotice={setNotice}
                     onView={setOverride}
+                    showCompareWithLms={showCompare}
+                    onCompared={() => void pendingMutationCount(officer.email).then(setPending)}
                   />
                 ) : null}
               </>

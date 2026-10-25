@@ -6,7 +6,8 @@ import {
   type LmsLocalMeta,
   type LmsTableName,
 } from '../lib/lmsLocalDb';
-import { saveReceiptOffline, syncLmsLocal } from '../lib/lmsOfflineSync';
+import { lmsDbVaultStatus } from '../lib/lmsDbVault';
+import { compareAndSendOfflineChanges, refreshLmsConnection, saveReceiptOffline } from '../lib/lmsOfflineSync';
 
 type LmsOfflineProps = {
   email: string;
@@ -14,6 +15,8 @@ type LmsOfflineProps = {
   busy: boolean;
   setBusy: (value: boolean) => void;
   setNotice: (value: string) => void;
+  onOnlineChange?: (online: boolean) => void;
+  onPendingChange?: (pending: number) => void;
 };
 
 const TABLE_LABELS: Record<LmsTableName, string> = {
@@ -36,7 +39,15 @@ function previewColumns(rows: Record<string, unknown>[]): string[] {
   return keys.slice(0, 6);
 }
 
-export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOfflineProps) {
+export function LmsOffline({
+  email,
+  online,
+  busy,
+  setBusy,
+  setNotice,
+  onOnlineChange,
+  onPendingChange,
+}: LmsOfflineProps) {
   const [meta, setMeta] = useState<LmsLocalMeta | null>(null);
   const [table, setTable] = useState<LmsTableName>('groups');
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -47,10 +58,14 @@ export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOffli
   const [amount, setAmount] = useState('');
   const [payment, setPayment] = useState<'Bank' | 'Mpesa'>('Mpesa');
   const [reference, setReference] = useState('');
+  const vault = lmsDbVaultStatus(email);
+  const pending = meta?.pendingMutations || 0;
+  const showCompare = online === true && pending > 0;
 
   async function refresh(selected: LmsTableName = table) {
     const nextMeta = await loadLmsMeta(email);
     setMeta(nextMeta);
+    onPendingChange?.(nextMeta?.pendingMutations || 0);
     setRows(await listLmsTable(selected, 150));
   }
 
@@ -59,9 +74,18 @@ export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOffli
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [email]);
 
-  async function runSync() {
+  async function runRefresh() {
     setBusy(true);
-    const result = await syncLmsLocal(email);
+    const result = await refreshLmsConnection(email);
+    setBusy(false);
+    onOnlineChange?.(result.online);
+    setNotice(result.detail);
+    await refresh(table);
+  }
+
+  async function runCompare() {
+    setBusy(true);
+    const result = await compareAndSendOfflineChanges(email);
     setBusy(false);
     setNotice(result.detail);
     await refresh(table);
@@ -91,10 +115,6 @@ export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOffli
       setAmount('');
       setReference('');
       setShowReceipt(false);
-      if (online) {
-        const synced = await syncLmsLocal(email);
-        setNotice(`${result.detail} ${synced.detail}`);
-      }
       await refresh('loan_receipts');
       setTable('loan_receipts');
     }
@@ -104,18 +124,26 @@ export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOffli
 
   return (
     <div className="lms-offline">
-      <h2>Phone LMS database</h2>
+      <h1>Encrypted offline LMS</h1>
       <p className="lms-lede">
         {meta
-          ? `${meta.constituencyName || 'Constituency'} tables saved ${new Date(meta.fetchedAt).toLocaleString()}. ${meta.pendingMutations ? `${meta.pendingMutations} change(s) waiting to upload.` : 'In sync when last connected.'}`
-          : 'No LMS tables on this phone yet. Sync while online to download your constituency database.'}
+          ? `${meta.constituencyName || 'Constituency'} database on this phone${vault ? ` (encrypted ${new Date(vault.savedAt).toLocaleString()})` : ''}. Same tables as lms.uwezo.go.ke for your area.`
+          : 'No encrypted LMS database on this phone yet. Tap Refresh while online to download and encrypt your constituency tables.'}
       </p>
+      {pending ? (
+        <p className="lms-note">{pending} offline change(s) waiting. Compare with the LMS appears when lms.uwezo.go.ke is reachable.</p>
+      ) : null}
       <div className="doc-actions">
-        <button type="button" className="btn-primary" disabled={busy || online === false} onClick={() => void runSync()}>
-          {busy ? 'Syncing…' : 'Sync with online LMS'}
+        <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runRefresh()}>
+          {busy ? 'Refreshing…' : 'Refresh'}
         </button>
+        {showCompare ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => void runCompare()}>
+            {busy ? 'Sending…' : 'Compare with the LMS'}
+          </button>
+        ) : null}
         <button type="button" className="btn-ghost" disabled={busy} onClick={() => setShowReceipt((value) => !value)}>
-          {showReceipt ? 'Cancel receipt' : 'Add receipt (works offline)'}
+          {showReceipt ? 'Cancel receipt' : 'Add receipt'}
         </button>
       </div>
       {showReceipt ? (
@@ -149,7 +177,7 @@ export function LmsOffline({ email, online, busy, setBusy, setNotice }: LmsOffli
             <input value={reference} onChange={(event) => setReference(event.target.value)} required />
           </label>
           <button type="submit" className="btn-primary" disabled={busy}>
-            Save on phone
+            Save offline
           </button>
         </form>
       ) : null}

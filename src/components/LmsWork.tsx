@@ -12,6 +12,7 @@ import {
   type LmsField,
   type LmsPageView,
 } from '../lib/lmsSync';
+import { compareAndSendOfflineChanges } from '../lib/lmsOfflineSync';
 
 type LmsWorkProps = {
   email: string;
@@ -22,9 +23,23 @@ type LmsWorkProps = {
   setBusy: (busy: boolean) => void;
   setNotice: (notice: string) => void;
   onView: (view: LmsPageView) => void;
+  /** Show Compare only when LMS is reachable and the offline DB has changes to send. */
+  showCompareWithLms?: boolean;
+  onCompared?: () => void;
 };
 
-export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice, onView }: LmsWorkProps) {
+export function LmsWork({
+  email,
+  path,
+  fields,
+  actions,
+  busy,
+  setBusy,
+  setNotice,
+  onView,
+  showCompareWithLms = false,
+  onCompared,
+}: LmsWorkProps) {
   const kit = pageKit(path);
   const report = Boolean(reportMethod(path));
   const kitActions = kit?.actions || [];
@@ -70,7 +85,7 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
     setNotice('Saved on this phone.');
   }
 
-  async function compare() {
+  async function compareFields() {
     const next = savedValues();
     saveLmsDraft(email, path, next);
     setBusy(true);
@@ -80,12 +95,20 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
     setReview(result.ok ? result.rows : null);
   }
 
+  async function compareWithLms() {
+    setBusy(true);
+    const result = await compareAndSendOfflineChanges(email);
+    setBusy(false);
+    setNotice(result.detail);
+    onCompared?.();
+  }
+
   async function submit(nextAction?: string) {
     const chosen = nextAction || action;
     const next = savedValues(chosen);
     saveLmsDraft(email, path, next);
     if (report && !review) {
-      await compare();
+      await compareFields();
       return;
     }
     setBusy(true);
@@ -99,7 +122,7 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
   }
 
   if (!report && !formFields.length && !actionList.length && !kit) {
-    return <p className="home-chat-note">This page is the latest copy from the LMS. Refresh pages to download it again.</p>;
+    return null;
   }
 
   return (
@@ -108,7 +131,7 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
       {report ? (
         <>
           <h2>{path.includes('sector') ? 'Sectoral analysis columns' : 'Report columns'}</h2>
-          <p className="home-chat-note">Choose the columns used on the online LMS. Compare them, then generate the report.</p>
+          <p className="home-chat-note">Choose the columns used on the online LMS, then generate the report while online.</p>
           {groups.map((group) => (
             <fieldset key={group}>
               <legend>{group}</legend>
@@ -172,15 +195,17 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
         {formFields.length || report ? (
           <button type="button" className="btn-ghost" disabled={busy} onClick={keep}>Save on this phone</button>
         ) : null}
-        {report || formFields.length ? (
-          <button type="button" className="btn-ghost" disabled={busy} onClick={() => void compare()}>Compare with the LMS</button>
+        {showCompareWithLms ? (
+          <button type="button" className="btn-primary" disabled={busy} onClick={() => void compareWithLms()}>
+            {busy ? 'Sending…' : 'Compare with the LMS'}
+          </button>
         ) : null}
         {review ? <button type="button" className="btn-ghost" disabled={busy} onClick={() => setReview(null)}>Make changes</button> : null}
         {kitActions.length ? kitActions.map((item, index) => (
           <button
             key={item.method}
             type="button"
-            className={index === 0 ? 'btn-primary' : 'btn-ghost'}
+            className={index === 0 && !showCompareWithLms ? 'btn-primary' : 'btn-ghost'}
             disabled={busy}
             onClick={() => {
               setAction(item.method);
@@ -190,8 +215,8 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
             {busy && action === item.method ? 'Working…' : item.label}
           </button>
         )) : (
-          <button type="button" className="btn-primary" disabled={busy || !action} onClick={() => void submit()}>
-            {busy ? 'Working…' : review ? 'Submit as saved on this phone' : (report ? 'Review before generate' : 'Run action')}
+          <button type="button" className="btn-ghost" disabled={busy || !action} onClick={() => void submit()}>
+            {busy ? 'Working…' : review ? 'Submit as saved on this phone' : (report ? 'Generate report' : 'Run action')}
           </button>
         )}
       </div>

@@ -1,10 +1,12 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { sealLmsDatabase } from './lmsDbVault';
 import { loadLmsCache } from './lmsSync';
 import {
   LMS_TABLES,
   listOutbox,
   loadLmsMeta,
   markOutbox,
+  pendingMutationCount,
   putLocalReceipt,
   queueMutation,
   replaceLmsSnapshot,
@@ -12,6 +14,8 @@ import {
   type LmsTableName,
   newClientKey,
 } from './lmsLocalDb';
+import { loadStaffSession } from './staffSession';
+import { probeOrigin } from './portalStatus';
 
 export type SyncResult = { ok: boolean; detail: string; meta?: LmsLocalMeta | null };
 
@@ -170,10 +174,16 @@ export async function pushLmsMutations(email: string): Promise<SyncResult> {
   };
 }
 
-/** Pull then push — keep phone tables aligned with online LMS. */
+async function sealIfPossible(email: string) {
+  const password = loadStaffSession()?.password || '';
+  if (password) await sealLmsDatabase(email, password);
+}
+
+/** Pull then push — keep phone tables aligned with online LMS, then encrypt offline copy. */
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
   const pushed = await pushLmsMutations(email);
   const pulled = await pullLmsSnapshot(email);
+  if (pulled.ok || pushed.ok) await sealIfPossible(email);
   if (!pulled.ok && !pushed.ok) {
     return { ok: false, detail: `${pushed.detail} ${pulled.detail}`.trim() };
   }
@@ -181,6 +191,65 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
     ok: pulled.ok,
     detail: [pushed.detail, pulled.detail].filter(Boolean).join(' '),
     meta: pulled.meta || pushed.meta,
+  };
+}
+
+/** Send only pending offline database changes when LMS is reachable. */
+export async function compareAndSendOfflineChanges(email: string): Promise<SyncResult> {
+  const online = await probeOrigin('https://lms.uwezo.go.ke');
+  if (!online) {
+    return { ok: false, detail: 'lms.uwezo.go.ke is not reachable. Keep working offline; changes stay on this phone.' };
+  }
+  const pending = await pendingMutationCount(email);
+  if (!pending) {
+    return { ok: true, detail: 'No offline database changes to send.' };
+  }
+  const pushed = await pushLmsMutations(email);
+  if (pushed.ok) {
+    const pulled = await pullLmsSnapshot(email);
+    await sealIfPossible(email);
+    return {
+      ok: true,
+      detail: `${pushed.detail}${pulled.ok ? ` ${pulled.detail}` : ''}`,
+      meta: pulled.meta || pushed.meta,
+    };
+  }
+  return pushed;
+}
+
+/**
+ * Refresh while signed in: probe lms.uwezo.go.ke by pulling the current page/session,
+ * then refresh the encrypted offline database. Auto-uploads pending changes when online.
+ */
+export async function refreshLmsConnection(email: string, path = '/dashboard'): Promise<SyncResult & { online: boolean }> {
+  const online = await probeOrigin('https://lms.uwezo.go.ke');
+  if (!online) {
+    return {
+      ok: false,
+      online: false,
+      detail: 'lms.uwezo.go.ke did not answer. Using the encrypted offline database on this phone.',
+      meta: await loadLmsMeta(email),
+    };
+  }
+  const cache = loadLmsCache(email);
+  const host = cache?.host || 'https://lms.uwezo.go.ke';
+  const cookie = cache?.cookie || '';
+  if (cookie) {
+    try {
+      await httpJson('GET', `${host}${path.startsWith('/') ? path : `/${path}`}`, cookie);
+    } catch {
+      /* probe already passed; page pull is best-effort */
+    }
+  }
+  const pending = await pendingMutationCount(email);
+  const synced = await syncLmsLocal(email);
+  return {
+    ok: synced.ok,
+    online: true,
+    detail: pending
+      ? `LMS is online. ${synced.detail}`
+      : `LMS is online. Screen refreshed. ${synced.detail}`,
+    meta: synced.meta,
   };
 }
 
@@ -222,9 +291,10 @@ export async function saveReceiptOffline(input: {
       client_key: clientKey,
     },
   });
+  await sealIfPossible(input.email);
   return {
     ok: true,
-    detail: 'Receipt saved on this phone. It will upload to the LMS when you are online.',
+    detail: 'Receipt saved in the encrypted offline database. Compare with the LMS when lms.uwezo.go.ke is reachable.',
     meta: await loadLmsMeta(input.email),
   };
 }

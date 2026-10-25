@@ -207,7 +207,24 @@ export async function putLocalReceipt(row: Record<string, unknown>): Promise<voi
   await txDone(tx);
 }
 
+export async function replaceOutbox(items: LmsOutboxItem[]): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction('outbox', 'readwrite');
+  const store = tx.objectStore('outbox');
+  store.clear();
+  for (const item of items) store.put(item);
+  await txDone(tx);
+  await setPendingCount(items.filter((item) => item.status === 'pending').length);
+}
+
 export function newClientKey(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return `lms-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function pendingMutationCount(email?: string): Promise<number> {
+  const meta = await loadLmsMeta(email);
+  if (meta) return meta.pendingMutations || 0;
+  const pending = await listOutbox('pending');
+  return pending.length;
 }
