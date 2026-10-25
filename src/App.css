@@ -605,6 +605,18 @@
   background: #f6f1e7;
 }
 
+.lms-offline__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.lms-offline__tabs .lms-link {
+  flex: 1 1 auto;
+  min-width: 7rem;
+}
+
 .mail-folders,
 .mail-read {
   display: flex;

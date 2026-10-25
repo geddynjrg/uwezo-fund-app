@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
+import { LmsOffline } from './LmsOffline';
 import { LmsWork } from './LmsWork';
 import { MailBox } from './MailBox';
 import {
@@ -15,6 +16,7 @@ import {
   type LmsRole,
   type LmsRowAction,
 } from '../lib/lmsSync';
+import { syncLmsLocal } from '../lib/lmsOfflineSync';
 import { openLmsSession } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
@@ -44,7 +46,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const pages = (cache?.menu && cache.menu.length ? cache.menu : LMS_PAGES[officer.role]) || LMS_PAGES.staff;
   const [page, setPage] = useState(pages[0]?.id || 'dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<'pages' | 'mail' | 'password'>('pages');
+  const [section, setSection] = useState<'pages' | 'mail' | 'password' | 'database'>('pages');
   const [mailRevision, setMailRevision] = useState(0);
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -55,6 +57,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [showPhoneCopy, setShowPhoneCopy] = useState(false);
   const autoRefreshDone = useRef('');
   const autoOpened = useRef('');
+  const autoDbSync = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
   const view = override || (current?.path ? cache?.pages[current.path] : null) || emptyView;
   const role = cache?.role || officer.role;
@@ -81,6 +84,12 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         autoOpened.current = officer.email;
         void openLivePage(current?.path || '/dashboard');
       }
+      if (autoDbSync.current !== officer.email) {
+        autoDbSync.current = officer.email;
+        void syncLmsLocal(officer.email).then((result) => {
+          if (result.ok) setNotice(result.detail);
+        });
+      }
       return;
     }
     if (autoRefreshDone.current === officer.email) return;
@@ -90,9 +99,13 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       if (next?.cookie) {
         autoOpened.current = officer.email;
         void openLivePage(current?.path || '/dashboard');
+        autoDbSync.current = officer.email;
+        void syncLmsLocal(officer.email).then((result) => {
+          if (result.ok) setNotice(result.detail);
+        });
       }
     });
-    // Pull session once, then open the live LMS.
+    // Pull session once, open live LMS, and sync constituency tables to the phone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [officer.email, lmsOnline]);
 
@@ -225,6 +238,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
               {item.title}
             </button>
           ))}
+          <button type="button" className="lms-link" onClick={() => { setSection('database'); setMenuOpen(false); }}>
+            <small>Offline</small>
+            Phone LMS database
+          </button>
           <button type="button" className="lms-link" onClick={() => { setSection('mail'); setMenuOpen(false); }}>
             <small>Mailbox</small>
             Mail
@@ -250,6 +267,14 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         ) : null}
         {section === 'mail' ? (
           <MailBox key={mailRevision} onPasswordReset={setNotice} />
+        ) : section === 'database' ? (
+          <LmsOffline
+            email={officer.email}
+            online={lmsOnline}
+            busy={busy}
+            setBusy={setBusy}
+            setNotice={setNotice}
+          />
         ) : section === 'password' ? (
           <form className="account-form" onSubmit={(event) => { event.preventDefault(); void changeMailboxPassword(); }}>
             <h1>Mailbox password</h1>
