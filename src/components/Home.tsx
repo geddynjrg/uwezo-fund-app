@@ -4,6 +4,7 @@ import { LINKS } from '../config';
 import { openExternal } from '../lib/openLink';
 import type { PortalAvailability, PortalId } from '../lib/portalStatus';
 import type { AppSession } from '../lib/session';
+import type { StaffSession } from '../lib/staffSession';
 import {
   getNativeVersion,
   installNativeUpdate,
@@ -18,12 +19,14 @@ type HomeProps = {
   onOpenOffline: (portal: PortalId) => void;
   portals: PortalAvailability;
   session?: AppSession | null;
+  staff?: StaffSession | null;
+  onOpenStaff?: () => void;
   showStaging?: boolean;
 };
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.1.29';
+const PACKAGE_VERSION = '1.1.30';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -43,6 +46,8 @@ export function Home({
   onOpenOffline,
   portals,
   session = null,
+  staff = null,
+  onOpenStaff,
   showStaging = false,
 }: HomeProps) {
   const [updateNote, setUpdateNote] = useState('');
@@ -190,6 +195,19 @@ export function Home({
       </section>
 
       <section className="home-chat-cta">
+        {staff ? (
+          <>
+            <p className="home-session">
+              Signed in as {staff.email}{staff.constituency ? ` · ${staff.constituency}` : ''}
+            </p>
+            <button type="button" className="btn-primary" onClick={onOpenStaff}>
+              Open LMS
+            </button>
+            <p className="home-chat-note">
+              Headquarters, accounts, and constituency pages stay on this phone until you log out.
+            </p>
+          </>
+        ) : null}
         {!session ? (
           <>
             <button type="button" className="btn-primary" onClick={onOpenAccount}>

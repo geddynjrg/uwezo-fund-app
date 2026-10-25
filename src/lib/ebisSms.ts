@@ -50,9 +50,10 @@ export async function sendEbisSms(mobile: string, message: string): Promise<{ ok
           signal: AbortSignal.timeout(20000),
         });
     const status = 'status' in response ? response.status : 0;
-    const text = Capacitor.isNativePlatform()
-      ? String((response as { data?: unknown }).data ?? '')
+    const raw = Capacitor.isNativePlatform()
+      ? (response as { data?: unknown }).data
       : await (response as Response).text();
+    const text = typeof raw === 'string' ? raw : raw == null ? '' : JSON.stringify(raw);
     if (ebisAccepted(status, text)) return { ok: true, detail: '' };
     return { ok: false, detail: 'EBIS did not accept the message.' };
   } catch (error) {
@@ -65,29 +66,43 @@ export async function sendEbisSms(mobile: string, message: string): Promise<{ ok
 }
 
 function ebisAccepted(status: number, text: string): boolean {
+  if (/<html/i.test(text)) return false;
   type EbisObject = {
-    success?: boolean;
+    success?: boolean | string | number;
     status?: string | number;
+    status_code?: string | number;
+    status_desc?: string;
+    response_code?: string | number;
+    response_description?: string;
+    message?: string;
+    message_id?: string | number;
+    messageid?: string | number;
     summary?: { successful?: number; failed?: number; total_numbers?: number };
   };
-  type EbisLegacy = { status_code?: string };
-  let json: EbisObject | EbisLegacy[] | null = null;
+  let json: EbisObject | EbisObject[] | null = null;
   try {
-    json = JSON.parse(text) as EbisObject | EbisLegacy[];
+    json = JSON.parse(text) as EbisObject | EbisObject[];
   } catch {
     json = null;
   }
-  if (json && !Array.isArray(json) && json.success === true) {
-    const summary = json.summary;
+  const record = json && !Array.isArray(json) ? json : null;
+  const legacy = Array.isArray(json) ? json[0] : null;
+  const code = String(record?.status_code ?? record?.status ?? legacy?.status_code ?? legacy?.status ?? '');
+  const summary = record?.summary;
+  const successFlag = record?.success === true || record?.success === 'true' || record?.success === 1;
+  const described = `${record?.status_desc || ''} ${record?.response_description || ''} ${record?.message || ''} ${legacy?.status_desc || ''}`;
+  if (successFlag) {
     if (!summary) return true;
     if (typeof summary.successful === 'number' && summary.successful > 0) return true;
     if (typeof summary.failed === 'number' && typeof summary.total_numbers === 'number' && summary.failed < summary.total_numbers) return true;
   }
-  if (status !== 200) return false;
-  if (json && !Array.isArray(json) && (json.status === '1000' || json.status === 1000)) return true;
-  if (Array.isArray(json)) {
-    const code = json[0]?.status_code;
-    return code === '1000' || code === '1';
-  }
-  return /success|sent/i.test(text);
+  if (summary && typeof summary.successful === 'number' && summary.successful < 1 && (summary.failed || 0) > 0) return false;
+  if (record?.success === false || record?.success === 'false') return false;
+  if (code === '1000' || code === '1' || /^success$/i.test(code)) return true;
+  if (String(record?.response_code || '') === '200' && /success|sent|queued|deliver/i.test(described)) return true;
+  if (/success|sent|queued|deliver/i.test(described) && !/fail|invalid|reject|error/i.test(described)) return true;
+  const deliveredId = record?.message_id || record?.messageid || legacy?.message_id || legacy?.messageid;
+  if (deliveredId && (status === 0 || (status >= 200 && status < 300))) return true;
+  if ((status === 0 || (status >= 200 && status < 300)) && /\b1000\b/.test(text) && /success|sent|queued/i.test(text) && !/\bfail|\binvalid|\breject/i.test(text)) return true;
+  return false;
 }

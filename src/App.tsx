@@ -6,6 +6,8 @@ import { Authenticator } from './components/Authenticator';
 import { Home } from './components/Home';
 import { Notifications } from './components/Notifications';
 import { LmsMobile } from './components/LmsMobile';
+import { clearStaffSession, loadStaffSession, type StaffSession } from './lib/staffSession';
+import type { LmsRole } from './lib/lmsSync';
 import { MajuuApply } from './components/MajuuApply';
 import { OfflineApply } from './components/OfflineApply';
 import { QrLoginScan } from './components/QrLoginScan';
@@ -35,14 +37,25 @@ type LmsOfficer = {
   email: string;
   constituency: string;
   passwordReset: boolean;
-  role: 'constituency' | 'headquarters' | 'secretariat' | 'staff';
+  role: LmsRole;
   syncDetail: string;
 };
+
+function officerFrom(staff: StaffSession): LmsOfficer {
+  return {
+    email: staff.email,
+    constituency: staff.constituency,
+    passwordReset: staff.passwordReset,
+    role: staff.role,
+    syncDetail: staff.syncDetail,
+  };
+}
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [offlinePortal, setOfflinePortal] = useState<PortalId>('loans');
   const [lmsOfficer, setLmsOfficer] = useState<LmsOfficer | null>(null);
+  const [staff, setStaff] = useState<StaffSession | null>(null);
   const [portals, setPortals] = useState<PortalAvailability>({ loans: null, majuu: null });
   const [session, setSession] = useState<AppSession | null>(null);
   const [toast, setToast] = useState<AppNotification | null>(null);
@@ -79,6 +92,7 @@ function App() {
 
   useEffect(() => {
     setSession(getActiveSession());
+    setStaff(loadStaffSession());
   }, []);
 
   useEffect(() => {
@@ -223,6 +237,7 @@ function App() {
         }}
         onOpenLms={(officer) => {
           setLmsOfficer(officer);
+          setStaff(loadStaffSession());
           setScreen('lms');
         }}
       />
@@ -240,7 +255,21 @@ function App() {
     );
   }
   if (screen === 'lms' && lmsOfficer) {
-    return <LmsMobile officer={lmsOfficer} onBack={() => setScreen('home')} />;
+    return (
+      <LmsMobile
+        officer={lmsOfficer}
+        onBack={() => {
+          setStaff(loadStaffSession());
+          setScreen('home');
+        }}
+        onLogout={() => {
+          clearStaffSession();
+          setStaff(null);
+          setLmsOfficer(null);
+          setScreen('home');
+        }}
+      />
+    );
   }
   if (screen === 'offline') {
     return (
@@ -268,6 +297,13 @@ function App() {
         }}
         portals={portals}
         session={session}
+        staff={staff}
+        onOpenStaff={() => {
+          const current = loadStaffSession();
+          if (!current) return;
+          setLmsOfficer(officerFrom(current));
+          setScreen('lms');
+        }}
         showStaging={showStaging}
       />
       {toastUi}

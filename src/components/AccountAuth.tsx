@@ -20,8 +20,9 @@ import { stopOtpListener } from '../lib/native';
 import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
-import { lmsHostOnline, syncLmsMailbox } from '../lib/lmsSync';
-import { isConstituencyMailbox, signInConstituencyOfficer, standardMailboxPassword } from '../lib/zimbraAuth';
+import { lmsHostOnline, syncLmsMailbox, type LmsRole } from '../lib/lmsSync';
+import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
+import { isConstituencyMailbox, signInConstituencyOfficer } from '../lib/zimbraAuth';
 
 type Mode = 'menu' | 'login' | 'reset' | 'signed_in';
 
@@ -33,7 +34,7 @@ type AccountAuthProps = {
     email: string;
     constituency: string;
     passwordReset: boolean;
-    role: 'constituency' | 'headquarters' | 'secretariat' | 'staff';
+    role: LmsRole;
     syncDetail: string;
   }) => void;
 };
@@ -109,6 +110,35 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     onSessionChange?.(next);
   }
 
+  function rememberOfficer(input: {
+    email: string;
+    constituency: string;
+    role: LmsRole;
+    syncDetail: string;
+    passwordReset: boolean;
+    lmsPassword: string;
+    mail: { email: string; token: string; password: string } | null;
+  }) {
+    const previous = loadStaffSession();
+    saveStaffSession({
+      email: input.email,
+      constituency: input.constituency,
+      role: input.role,
+      syncDetail: input.syncDetail,
+      passwordReset: input.passwordReset || Boolean(previous?.email === input.email && previous.passwordReset),
+      password: input.lmsPassword,
+      signedInAt: new Date().toISOString(),
+      mail: input.mail || (previous?.email === input.email ? previous.mail : null),
+    });
+    onOpenLms?.({
+      email: input.email,
+      constituency: input.constituency,
+      passwordReset: input.passwordReset,
+      role: input.role,
+      syncDetail: input.syncDetail,
+    });
+  }
+
   async function onLogin(e: FormEvent) {
     e.preventDefault();
     const emailNorm = email.trim().toLowerCase();
@@ -128,12 +158,14 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
       const lmsOnline = await lmsHostOnline();
       const lms = lmsOnline ? await syncLmsMailbox(emailNorm, password) : null;
       if (lms?.authenticated) {
-        onOpenLms?.({
+        rememberOfficer({
           email: emailNorm,
           constituency: lms.constituency || emailNorm,
           passwordReset: false,
           role: lms.role,
           syncDetail: lms.detail,
+          lmsPassword: password,
+          mail: null,
         });
         return;
       }
@@ -143,9 +175,9 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
           setError(lms?.detail && lmsOnline ? `${officer.message} ${lms.detail}` : officer.message);
           return;
         }
-        const mailboxPassword = officer.passwordReset ? standardMailboxPassword() : password;
+        const mailboxPassword = officer.password;
         const synced = lmsOnline ? await syncLmsMailbox(officer.email, mailboxPassword) : null;
-        onOpenLms?.({
+        rememberOfficer({
           email: officer.email,
           constituency: synced?.constituency || officer.constituency,
           passwordReset: officer.passwordReset,
@@ -153,6 +185,8 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
           syncDetail: synced?.authenticated
             ? synced.detail
             : `Signed in with the constituency mailbox. ${synced?.detail || 'lms.uwezo.go.ke did not accept this password, so the constituency menu is shown without a new download.'}`,
+          lmsPassword: synced?.authenticated ? mailboxPassword : '',
+          mail: { email: officer.email, token: officer.token, password: officer.password },
         });
         return;
       }

@@ -1,19 +1,24 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
-export type LmsRole = 'constituency' | 'headquarters' | 'secretariat' | 'staff';
+export type LmsRole = 'constituency' | 'headquarters' | 'secretariat' | 'accountant' | 'staff';
 
 const CACHE_KEY = 'uwezo.lms.cache';
 
 export type LmsPage = { id: string; group: string; title: string; path: string };
+
+export type LmsSummary = { label: string; value: string; note: string };
+export type LmsTable = { title: string; headers: string[]; rows: string[][] };
+export type LmsPageView = { summary: LmsSummary[]; tables: LmsTable[]; notes: string[] };
 
 export type LmsCache = {
   email: string;
   role: LmsRole;
   fetchedAt: string;
   detail: string;
-  pages: Record<string, string>;
+  pages: Record<string, LmsPageView>;
   menu?: LmsPage[];
   host?: string;
+  cookie?: string;
 };
 
 const LMS_HOSTS = ['https://lms.uwezo.go.ke', 'https://lms-staging.uwezo.go.ke'];
@@ -48,7 +53,10 @@ export function constituencyMenu(basePath: string): LmsPage[] {
   const county = base.split('/').filter(Boolean)[0] || '';
   return CONSTITUENCY_SUFFIXES.flatMap((item) => {
     if (item.suffix === '/help') return [{ id: item.id, group: item.group, title: item.title, path: '/help' }];
-    if (!base) return [{ id: item.id, group: item.group, title: item.title, path: '' }];
+    if (!base) {
+      if (item.id === 'dashboard') return [{ id: item.id, group: item.group, title: item.title, path: '/dashboard' }];
+      return [];
+    }
     if (item.suffix.startsWith('/../')) {
       return county ? [{ id: item.id, group: item.group, title: item.title, path: `/${county}${item.suffix.slice(3)}` }] : [];
     }
@@ -60,40 +68,71 @@ export function constituencyMenu(basePath: string): LmsPage[] {
 export const LMS_PAGES: Record<LmsRole, LmsPage[]> = {
   constituency: constituencyMenu(''),
   headquarters: [
-    { id: 'dashboard', group: 'National Administration', title: 'HQ Dashboard', path: '/staff/hq' },
-    { id: 'analytics', group: 'National Administration', title: 'HQ Analytics', path: '/staff/hq/analytics' },
-    { id: 'aging', group: 'National Administration', title: 'Phase Aging', path: '/staff/hq/analytics/phase-aging' },
-    { id: 'process', group: 'Processing', title: 'Process as CO', path: '/staff/hq/process' },
-    { id: 'phases', group: 'Processing', title: 'Review Cohorts', path: '/staff/hq/phases' },
-    { id: 'report', group: 'Reports', title: 'Generate Report', path: '/staff/hq/reports/dynamic-report' },
-    { id: 'all', group: 'Submissions', title: 'All Applications', path: '/staff/applications' },
-    { id: 'intake', group: 'Submissions', title: 'Intake Queue', path: '/staff/applications?status=submitted' },
+    { id: 'dashboard', group: 'Headquarters', title: 'HQ Dashboard', path: '/dashboard' },
+    { id: 'applications', group: 'Submissions', title: 'Applications', path: '/hq/applications' },
+    { id: 'tasks', group: 'Submissions', title: 'Approval Tasks', path: '/hq/applications/approval-tasks' },
+    { id: 'allocations', group: 'Headquarters', title: 'Allocations', path: '/hq/allocations' },
+    { id: 'groups', group: 'Groups', title: 'Groups', path: '/hq/groups/list' },
+    { id: 'group-loans', group: 'Loans', title: 'Group Loans', path: '/hq/loans/group-loans' },
+    { id: 'receipts', group: 'Loans', title: 'Receipts', path: '/hq/loans/receipts' },
+    { id: 'volume', group: 'Reports', title: 'Apps by Constituency', path: '/hq/reports/application-volume' },
+    { id: 'report', group: 'Reports', title: 'Generate Report', path: '/hq/reports' },
+    { id: 'aging', group: 'Headquarters', title: 'Phase Aging', path: '/phase-aging' },
+    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
   ],
   secretariat: [
-    { id: 'dashboard', group: 'Secretariat', title: 'Secretariat Dashboard', path: '/staff/secretariat' },
-    { id: 'analytics', group: 'Secretariat', title: 'National Analytics', path: '/staff/secretariat/analytics' },
-    { id: 'all', group: 'Submissions', title: 'All Applications', path: '/staff/applications' },
-    { id: 'intake', group: 'Submissions', title: 'Intake Queue', path: '/staff/applications?status=submitted' },
-    { id: 'gate', group: 'Submissions', title: 'HOS Training Gate', path: '/staff/applications?status=ps_attestation' },
+    { id: 'phases', group: 'Secretariat', title: 'Phases', path: '/secretariat/phases' },
+    { id: 'dashboard', group: 'Secretariat', title: 'National Dashboard', path: '/dashboard?national=1' },
+    { id: 'volume', group: 'Reports', title: 'Application Volume', path: '/secretariat/application-volume' },
+    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
+  ],
+  accountant: [
+    { id: 'phases', group: 'Accounts', title: 'Phases for Payment', path: '/accountant/phases' },
+    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
   ],
   staff: [
-    { id: 'dashboard', group: 'LMS', title: 'Dashboard', path: '/staff' },
+    { id: 'dashboard', group: 'LMS', title: 'Dashboard', path: '/dashboard' },
+    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
   ],
 };
+
+export function roleLabel(role: LmsRole): string {
+  if (role === 'headquarters') return 'headquarters';
+  if (role === 'accountant') return 'accountant';
+  if (role === 'secretariat') return 'secretariat';
+  if (role === 'constituency') return 'constituency officer';
+  return 'staff';
+}
 
 export function loadLmsCache(email: string): LmsCache | null {
   try {
     const parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || '') as LmsCache;
-    return parsed.email === email ? parsed : null;
+    if (parsed.email !== email) return null;
+    const pages: Record<string, LmsPageView> = {};
+    for (const [path, value] of Object.entries(parsed.pages || {})) {
+      if (value && typeof value === 'object' && Array.isArray((value as LmsPageView).tables)) pages[path] = value;
+    }
+    return { ...parsed, pages };
   } catch {
     return null;
   }
 }
 
-function roleFromLocation(value: string): LmsRole {
-  if (value.includes('/secretariat')) return 'secretariat';
-  if (value.includes('/hq') || value.includes('national=1')) return 'headquarters';
-  if (/\/[a-z0-9-]+\/[a-z0-9-]+\/dashboard/i.test(value) || value.includes('constituency')) return 'constituency';
+export function saveLmsCache(cache: LmsCache) {
+  localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+}
+
+function roleFromPage(url: string, html: string): LmsRole {
+  let path = url;
+  try {
+    path = new URL(url, 'https://lms.uwezo.go.ke').pathname;
+  } catch {
+    path = url;
+  }
+  if (path.startsWith('/accountant')) return 'accountant';
+  if (path.startsWith('/secretariat')) return 'secretariat';
+  if (path.startsWith('/hq') || /href="[^"]*\/hq\/(?:applications|reports|groups|loans|allocations)/.test(html)) return 'headquarters';
+  if (constituencyBase(`${url} ${html}`) || /assigned constituencies/i.test(html)) return 'constituency';
   return 'staff';
 }
 
@@ -102,14 +141,85 @@ function constituencyBase(value: string): string {
   return match ? `/${match[1]}/${match[2]}` : '';
 }
 
-function stripHtml(html: string): string {
-  return html
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&times;/g, ' ')
+    .replace(/&rarr;|&larr;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, digits: string) => String.fromCharCode(Number(digits)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, digits: string) => String.fromCharCode(parseInt(digits, 16)))
+    .replace(/&amp;/g, '&');
+}
+
+function textOf(html: string): string {
+  return decodeEntities(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+function contentHtml(html: string): string {
+  const marked = /<div class="content-wrapper">([\s\S]*?)<\/div>\s*<!-- \/\.content-wrapper -->/i.exec(html);
+  const start = html.search(/<div class="content-wrapper">/i);
+  const end = html.search(/<footer class="main-footer/i);
+  const body = marked?.[1] || (start >= 0 && end > start ? html.slice(start, end) : html);
+  return body
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 2500);
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
+    .replace(/<ol class="breadcrumb[\s\S]*?<\/ol>/gi, ' ');
+}
+
+export function pageView(html: string): LmsPageView {
+  const body = contentHtml(html);
+  const summary: LmsSummary[] = [];
+  for (const match of body.matchAll(/<h4[^>]*>([\s\S]*?)<\/h4>([\s\S]{0,700}?)<p[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const value = textOf(match[1]);
+    const label = textOf(match[3]);
+    const note = textOf(match[2].match(/<small[^>]*>([\s\S]*?)<\/small>/i)?.[1] || '');
+    if (label || value) summary.push({ label: label || 'Figure', value, note });
+  }
+  for (const match of body.matchAll(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>/gi)) {
+    const label = textOf(match[1]);
+    if (label) summary.push({ label, value: '', note: 'Assigned' });
+  }
+  const tables: LmsTable[] = [];
+  for (const match of body.matchAll(/<table[\s\S]*?<\/table>/gi)) {
+    const block = match[0];
+    const headers = [...block.matchAll(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi)].map((cell) => textOf(cell[1])).filter(Boolean).slice(0, 8);
+    const rows = [...block.matchAll(/<tr[\s\S]*?>([\s\S]*?)<\/tr>/gi)].map((row) => (
+      [...row[1].matchAll(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi)].map((cell) => textOf(cell[1]).slice(0, 120)).slice(0, 8)
+    )).filter((cells) => cells.some(Boolean)).slice(0, 30);
+    if (headers.length || rows.length) {
+      const caption = textOf(block.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i)?.[1] || '');
+      tables.push({ title: caption, headers, rows });
+    }
+    if (tables.length >= 3) break;
+  }
+  const notes = summary.length || tables.length
+    ? []
+    : [...body.matchAll(/<(?:h3|h5|p)[^>]*>([\s\S]*?)<\/(?:h3|h5|p)>/gi)]
+      .map((item) => textOf(item[1]))
+      .filter((item) => item.length > 20 && item.length < 280)
+      .slice(0, 5);
+  const seen = new Set<string>();
+  return {
+    summary: summary.filter((item) => {
+      const key = `${item.label}|${item.value}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 8),
+    tables,
+    notes,
+  };
+}
+
+export function reportMethod(path: string): string {
+  if (path.includes('application-volume')) return 'previewReport';
+  if (path.includes('dynamic-report') || path.endsWith('/reports') || path.endsWith('/hq/reports')) return 'generateReport';
+  return '';
 }
 
 function cookieHeader(setCookie: string): string {
@@ -210,8 +320,8 @@ async function loginToHost(host: string, email: string, password: string): Promi
   if (!accepted) return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'The LMS database did not accept this email and password.' };
   const nextUrl = location.startsWith('http') ? location : `${host}${location.startsWith('/') ? location : '/dashboard'}`;
   const landed = await readText(nextUrl, session);
-  const html = `${landed.url} ${landed.text}`;
-  return { ok: true, role: roleFromLocation(html), cookie: cookieHeader(`${session}; ${landed.setCookie}`), html, detail: '' };
+  const html = `${landed.url}\n${landed.text}`;
+  return { ok: true, role: roleFromPage(landed.url || nextUrl, landed.text), cookie: cookieHeader(`${session}; ${landed.setCookie}`), html, detail: '' };
 }
 
 export async function syncLmsMailbox(email: string, password: string): Promise<{ authenticated: boolean; role: LmsRole; detail: string; constituency: string }> {
@@ -226,20 +336,22 @@ export async function syncLmsMailbox(email: string, password: string): Promise<{
         continue;
       }
       const base = constituencyBase(signed.html);
-      const role = base ? 'constituency' : signed.role;
+      const role = signed.role === 'constituency' && !base && !/assigned constituencies/i.test(signed.html) ? 'staff' : signed.role;
       const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
-      const pages: Record<string, string> = {};
+      const pages: Record<string, LmsPageView> = {};
       const seen = new Set<string>();
+      let cookie = signed.cookie;
       for (const page of menu) {
         if (!page.path || seen.has(page.path)) continue;
         seen.add(page.path);
-        const loaded = await readText(`${host}${page.path}`, signed.cookie);
-        pages[page.path] = stripHtml(loaded.text);
+        const loaded = await readText(`${host}${page.path}`, cookie);
+        cookie = cookieHeader(`${cookie}; ${loaded.setCookie}`) || cookie;
+        pages[page.path] = pageView(loaded.text);
       }
-      const detail = `Signed in to ${host.replace('https://', '')}. The ${role} pages were downloaded and replace the previous copy on this phone.`;
-      const next: LmsCache = { email, role, fetchedAt: new Date().toISOString(), detail, pages, menu, host };
-      localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-      const constituency = base.split('/').filter(Boolean)[1]?.replace(/-/g, ' ') || '';
+      const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Figures and tables from each page are saved on this phone.`;
+      const next: LmsCache = { email, role, fetchedAt: new Date().toISOString(), detail, pages, menu, host, cookie };
+      saveLmsCache(next);
+      const constituency = role === 'constituency' ? (base.split('/').filter(Boolean)[1]?.replace(/-/g, ' ') || '') : '';
       return { authenticated: true, role, detail, constituency };
     }
     return {
@@ -258,4 +370,81 @@ export async function syncLmsMailbox(email: string, password: string): Promise<{
         : 'lms.uwezo.go.ke did not answer.',
     };
   }
+}
+
+function xsrfToken(cookie: string): string {
+  const raw = /XSRF-TOKEN=([^;]+)/.exec(cookie)?.[1] || '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function postJson(url: string, cookie: string, referer: string, data: unknown): Promise<{ status: number; text: string }> {
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'X-Livewire': '',
+    Cookie: cookie,
+    'X-XSRF-TOKEN': xsrfToken(cookie),
+    Referer: referer,
+  };
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.post({ url, headers, data, connectTimeout: 30000, readTimeout: 45000 });
+    const raw = response.data;
+    return { status: response.status, text: typeof raw === 'string' ? raw : JSON.stringify(raw ?? '') };
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data),
+    credentials: 'include',
+    signal: AbortSignal.timeout(45000),
+  });
+  return { status: response.status, text: await response.text() };
+}
+
+export async function generateLmsReport(email: string, path: string): Promise<{ ok: boolean; detail: string; view: LmsPageView }> {
+  const cache = loadLmsCache(email);
+  const current = cache?.pages[path] || { summary: [], tables: [], notes: [] };
+  const method = reportMethod(path);
+  if (!cache?.host || !cache.cookie) return { ok: false, detail: 'Sign in to the LMS again, then generate the report.', view: current };
+  if (!method) return { ok: false, detail: 'This page shows its rows directly.', view: current };
+  const pageUrl = `${cache.host}${path}`;
+  const loaded = await readText(pageUrl, cache.cookie);
+  const expired = /\/login\/?(?:\?|$)/.test(loaded.url) || (/name="_token"/.test(loaded.text) && !/content-wrapper/.test(loaded.text));
+  if (expired) return { ok: false, detail: 'The LMS sign-in expired. Refresh the pages and try the report again.', view: current };
+  const snapshot = decodeEntities(/wire:snapshot="([^"]+)"/.exec(contentHtml(loaded.text))?.[1] || '');
+  const token = /csrf-token"\s+content="([^"]+)"/.exec(loaded.text)?.[1] || /name="_token"\s+value="([^"]+)"/.exec(loaded.text)?.[1] || '';
+  if (!snapshot || !token) return { ok: false, detail: 'This report page did not include a generate action.', view: pageView(loaded.text) };
+  const cookie = cookieHeader(`${cache.cookie}; ${loaded.setCookie}`) || cache.cookie;
+  const posted = await postJson(`${cache.host}/livewire/update`, cookie, pageUrl, {
+    _token: token,
+    components: [{ snapshot, updates: {}, calls: [{ path: '', method, params: [] }] }],
+  });
+  let html = '';
+  try {
+    const data = JSON.parse(posted.text) as { components?: { effects?: { html?: string } }[] };
+    html = data.components?.[0]?.effects?.html || '';
+  } catch {
+    html = '';
+  }
+  if (!html) {
+    return {
+      ok: false,
+      detail: posted.status === 419
+        ? 'The LMS sign-in expired. Refresh the pages and try the report again.'
+        : 'The report did not return any rows.',
+      view: pageView(loaded.text),
+    };
+  }
+  const view = pageView(html);
+  saveLmsCache({ ...cache, cookie, pages: { ...cache.pages, [path]: view } });
+  const count = view.tables.reduce((sum, table) => sum + table.rows.length, 0);
+  return {
+    ok: view.tables.length > 0 || view.summary.length > 0,
+    detail: count ? `Report ready. ${count} rows.` : 'The report ran. There are no rows for the current filters.',
+    view,
+  };
 }

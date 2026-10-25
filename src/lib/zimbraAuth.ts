@@ -11,7 +11,11 @@ const ADMIN_ACCOUNT = 'ictsupport@uwezo.go.ke';
 const ADMIN_PASSWORD = 'Uwezo2025%';
 
 export type ConstituencySignIn =
-  | { ok: true; email: string; constituency: string; passwordReset: boolean }
+  | { ok: true; email: string; constituency: string; passwordReset: boolean; token: string; password: string }
+  | { ok: false; message: string };
+
+export type MailboxSignIn =
+  | { ok: true; email: string; token: string; password: string; passwordReset: boolean }
   | { ok: false; message: string };
 
 export function isConstituencyMailbox(email: string): boolean {
@@ -23,7 +27,7 @@ export function constituencyLabel(email: string): string {
   return local ? local.charAt(0).toUpperCase() + local.slice(1) : email;
 }
 
-function xmlEscape(value: string): string {
+export function xmlEscape(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -149,25 +153,62 @@ function authFailed(xml: string): boolean {
 async function authenticateAccount(
   email: string,
   password: string,
-): Promise<{ kind: 'ok' | 'expired' | 'failed' | 'unreachable'; detail: string }> {
+): Promise<{ kind: 'ok' | 'expired' | 'failed' | 'unreachable'; detail: string; token: string }> {
   const message = authEnvelope('urn:zimbraAccount', email, password);
   try {
     const xml = await postSoap(soapUrl('account'), message.soap12, message.soap11);
-    if (xml.includes('<authToken')) return { kind: 'ok', detail: '' };
-    if (passwordExpired(xml)) return { kind: 'expired', detail: '' };
-    if (authFailed(xml)) return { kind: 'failed', detail: '' };
-    if (!xml.trim()) return { kind: 'unreachable', detail: 'mail.govmail.ke returned an empty response.' };
+    const token = xml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
+    if (token) return { kind: 'ok', detail: '', token };
+    if (passwordExpired(xml)) return { kind: 'expired', detail: '', token: '' };
+    if (authFailed(xml)) return { kind: 'failed', detail: '', token: '' };
+    if (!xml.trim()) return { kind: 'unreachable', detail: 'mail.govmail.ke returned an empty response.', token: '' };
     if (/<html/i.test(xml)) {
       return {
         kind: 'unreachable',
+        token: '',
         detail:
           'mail.govmail.ke is up, but it returned the website instead of the mailbox sign-in service. The browser can show that website; the app needs /service/soap.',
       };
     }
-    return { kind: 'failed', detail: '' };
+    return { kind: 'failed', detail: '', token: '' };
   } catch (error) {
-    return { kind: 'unreachable', detail: explainTransportError(error) };
+    return { kind: 'unreachable', detail: explainTransportError(error), token: '' };
   }
+}
+
+export async function zimbraAccountRequest(token: string, body: string): Promise<{ xml: string; authFailed: boolean }> {
+  const message = envelope(body, token);
+  const xml = await postSoap(soapUrl('account'), message.soap12, message.soap11);
+  return { xml, authFailed: /AUTH_EXPIRED|AUTH_REQUIRED|no auth token|auth credentials have expired/i.test(xml) };
+}
+
+export function isUwezoMailbox(email: string): boolean {
+  return /^[^\s@]+@uwezo\.go\.ke$/i.test(email.trim());
+}
+
+/** Any Uwezo mailbox. An expired password is reset and the mailbox owner is told the new one. */
+export async function signInMailbox(email: string, password: string): Promise<MailboxSignIn> {
+  const mailbox = email.trim().toLowerCase();
+  if (!isUwezoMailbox(mailbox)) {
+    return { ok: false, message: 'Use the Uwezo mailbox, for example name@uwezo.go.ke.' };
+  }
+  let outcome = await authenticateAccount(mailbox, password);
+  let passwordReset = false;
+  let activePassword = password;
+  if (outcome.kind === 'expired') {
+    const resetError = await resetExpiredMailbox(mailbox);
+    if (resetError) return { ok: false, message: resetError };
+    activePassword = STANDARD_MAILBOX_PASSWORD;
+    outcome = await authenticateAccount(mailbox, activePassword);
+    passwordReset = outcome.kind === 'ok';
+  }
+  if (outcome.kind === 'unreachable') {
+    return { ok: false, message: outcome.detail || 'Could not reach mail.govmail.ke. Check your connection, then try again.' };
+  }
+  if (outcome.kind !== 'ok' || !outcome.token) {
+    return { ok: false, message: 'Authentication failed for this mailbox.' };
+  }
+  return { ok: true, email: mailbox, token: outcome.token, password: activePassword, passwordReset };
 }
 
 async function resetExpiredMailbox(email: string): Promise<string | null> {
@@ -187,7 +228,7 @@ async function resetExpiredMailbox(email: string): Promise<string | null> {
   );
   const accountXml = await postSoap(soapUrl('admin'), lookup.soap12, lookup.soap11);
   const accountId = accountXml.match(/<account\b[^>]*\bid="([^"]+)"/)?.[1] || '';
-  if (!accountId) return 'This constituency mailbox was not found in Zimbra.';
+  if (!accountId) return 'This mailbox was not found in Zimbra.';
 
   const reset = envelope(
     `<SetPasswordRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><newPassword>${xmlEscape(STANDARD_MAILBOX_PASSWORD)}</newPassword></SetPasswordRequest>`,
@@ -205,7 +246,7 @@ async function resetExpiredMailbox(email: string): Promise<string | null> {
   return null;
 }
 
-/** Zimbra proves the constituency mailbox. The auth token and password are not stored. */
+/** Zimbra proves the constituency mailbox. The token is kept on this phone so mail stays open. */
 export async function signInConstituencyOfficer(email: string, password: string): Promise<ConstituencySignIn> {
   const mailbox = email.trim().toLowerCase();
   if (!isConstituencyMailbox(mailbox)) {
@@ -214,25 +255,16 @@ export async function signInConstituencyOfficer(email: string, password: string)
       message: 'Use the constituency mailbox, for example turkanawest@uwezo.go.ke.',
     };
   }
-
-  let outcome = await authenticateAccount(mailbox, password);
-  let passwordReset = false;
-  if (outcome.kind === 'expired') {
-    const resetError = await resetExpiredMailbox(mailbox);
-    if (resetError) return { ok: false, message: resetError };
-    outcome = await authenticateAccount(mailbox, STANDARD_MAILBOX_PASSWORD);
-    passwordReset = outcome.kind === 'ok';
-  }
-  if (outcome.kind === 'unreachable') {
-    return {
-      ok: false,
-      message: outcome.detail || 'Could not reach mail.govmail.ke. Check your connection, then try again.',
-    };
-  }
-  if (outcome.kind !== 'ok') {
-    return { ok: false, message: 'Authentication failed for this constituency mailbox.' };
-  }
-  return { ok: true, email: mailbox, constituency: constituencyLabel(mailbox), passwordReset };
+  const signed = await signInMailbox(mailbox, password);
+  if (!signed.ok) return signed;
+  return {
+    ok: true,
+    email: signed.email,
+    constituency: constituencyLabel(signed.email),
+    passwordReset: signed.passwordReset,
+    token: signed.token,
+    password: signed.password,
+  };
 }
 
 export function standardMailboxPassword(): string {
