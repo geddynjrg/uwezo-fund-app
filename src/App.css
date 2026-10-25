@@ -644,6 +644,55 @@
   background: #fff;
 }
 
+.mail-body {
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.mail-body img {
+  max-width: 100%;
+  height: auto;
+}
+
+.mail-attach-list,
+.mail-attach-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.6rem 0;
+}
+
+.mail-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--uf-line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.mail-attach-preview img,
+.mail-pdf-preview {
+  width: 100%;
+  max-height: 22rem;
+  border: 1px solid var(--uf-line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.mail-text-preview {
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.7rem;
+  border: 1px solid var(--uf-line);
+  border-radius: 10px;
+  background: #fff;
+  white-space: pre-wrap;
+}
+
 .lms-fields fieldset {
   border: 1px solid var(--uf-line);
   border-radius: 12px;
