@@ -1,5 +1,5 @@
 {
-  "versionCode": 41,
-  "versionName": "1.1.37",
-  "notes": "Live LMS in-app: every website action (Approval Tasks, uploads, Livewire) opens signed-in. Majuu cleanup for erroneous turkanaeast applicant."
+  "versionCode": 42,
+  "versionName": "1.1.38",
+  "notes": "Offline LMS database: constituency tables sync to the phone and upload receipts when back online. Live LMS still opens for full website actions."
 }
