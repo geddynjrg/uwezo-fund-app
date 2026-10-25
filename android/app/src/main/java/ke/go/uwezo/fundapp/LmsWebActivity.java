@@ -170,10 +170,23 @@ public class LmsWebActivity extends Activity {
       int n;
       while ((n = reader.read(buf)) >= 0) sb.append(buf, 0, n);
       reader.close();
-      return sb.toString();
+      return scrubOfflineLeak(sb.toString());
     } catch (Exception e) {
       return null;
     }
+  }
+
+  /** Strip Alpine/JS bodies that otherwise render as visible text offline. */
+  private static String scrubOfflineLeak(String html) {
+    if (html == null || html.isEmpty()) return html;
+    String doc = html;
+    doc = doc.replaceAll(
+        "(?is)>\\s*(?:\\{[\\s\\S]{0,4000}?filteredOptions\\s*\\(|filteredOptions\\s*\\(|get\\s+filteredOptions|found\\s*&&\\s*found\\[|COUNTY\\s+o\\s*&&|Select County|this\\.value\\)\\s*;\\s*return|if\\s*\\(\\s*!this\\.options)[\\s\\S]*?(?=<)",
+        ">");
+    doc = doc.replaceAll(
+        "(?is)>\\s*((?:function\\s*\\(|return\\s+\\[\\]|Array\\.isArray\\(|this\\.search|this\\.options|o\\s*&&\\s*o\\[|Select County|filteredOptions)[\\s\\S]{20,12000}?)\\s*<",
+        "><");
+    return doc;
   }
 
   private class OfflineBridge {

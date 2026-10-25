@@ -41,11 +41,16 @@ export function getCachedPageHtml(email: string, path: string): string | null {
   return shells.pages[normalized] || shells.pages[path.split('?')[0]] || null;
 }
 
-/** Prefer full native-disk HTML, then localStorage index. */
+/** Prefer full native-disk HTML, then localStorage index. Scrub Alpine/JS leaks. */
 export async function resolveCachedPageHtml(email: string, path: string): Promise<string | null> {
   const fromDisk = await readLmsOfflinePage(path);
-  if (fromDisk && fromDisk.length > 200) return fromDisk;
-  return getCachedPageHtml(email, path);
+  const raw = fromDisk && fromDisk.length > 200 ? fromDisk : getCachedPageHtml(email, path);
+  if (!raw) return null;
+  const cleaned = scrubCachedPageHtml(raw);
+  if (cleaned !== raw && fromDisk) {
+    void saveLmsOfflinePage(path, cleaned);
+  }
+  return cleaned;
 }
 
 export function hasAnyCachedScreens(email: string): boolean {
@@ -95,26 +100,67 @@ function collectStylesheetHrefs(html: string, host: string): string[] {
   return [...new Set(hrefs)];
 }
 
-function stripLiveScripts(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/\swire:[\w.-]+=["'][^"']*["']/gi, '')
-    .replace(/\sx-data=["'][^"']*["']/gi, '')
-    .replace(/\sx-on:[\w.-]+=["'][^"']*["']/gi, '');
+/** Remove Livewire/Alpine that otherwise leaks as visible JS/SQL-like text offline. */
+function sanitizeOfflineHtml(html: string): string {
+  let doc = html;
+  // Drop executable / Alpine template blocks entirely
+  doc = doc.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  doc = doc.replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, '');
+  // Alpine / Livewire attributes (quoted, including multiline)
+  doc = doc.replace(
+    /\s(?:x-[\w.:-]+|wire:[\w.-]+|@[\w.:-]+|x-on:[\w.-]+)\s*=\s*(["'])[\s\S]*?\1/gi,
+    '',
+  );
+  // Unquoted alpine-ish attributes
+  doc = doc.replace(/\s(?:x-[\w.:-]+|wire:[\w.-]+)\s*=\s*[^\s>]+/gi, '');
+  // Broken x-data / x-text bodies that browsers promote to text nodes
+  doc = doc.replace(
+    />\s*(?:\{[\s\S]{0,4000}?filteredOptions\s*\(|filteredOptions\s*\(|get\s+filteredOptions|found\s*&&\s*found\[|COUNTY\s+o\s*&&|Select County|this\.value\)\s*;\s*return|if\s*\(\s*!this\.options)[\s\S]*?(?=<)/gi,
+    '>',
+  );
+  // Any leftover text chunks that look like JS source between tags
+  doc = doc.replace(
+    />\s*((?:function\s*\(|return\s+\[\]|Array\.isArray\(|this\.search|this\.options|o\s*&&\s*o\[|Select County|filteredOptions)[\s\S]{20,12000}?)\s*</gi,
+    '><',
+  );
+  return doc;
 }
 
 function injectOfflineChrome(html: string, paths: string[]): string {
   const list = JSON.stringify(paths);
   const chrome = `
 <style id="uwezo-offline-chrome">
-  #uwezo-offline-banner{position:sticky;top:0;z-index:99999;background:#7a1f6a;color:#fff;padding:.55rem .9rem;font:600 14px/1.3 system-ui,sans-serif;text-align:center}
-  #uwezo-offline-banner small{display:block;font-weight:400;opacity:.9;margin-top:.15rem}
-  a.uwezo-offline-disabled,button.uwezo-offline-disabled{opacity:.55}
+  #uwezo-offline-banner{position:sticky;top:0;z-index:99999;background:#7a1f6a;color:#fff;padding:.28rem .55rem;font:600 12px/1.2 system-ui,sans-serif;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #uwezo-offline-banner[data-msg]:not([data-msg=""])::after{content:" · " attr(data-msg);font-weight:400;opacity:.92}
 </style>
-<div id="uwezo-offline-banner">Offline LMS — same screens as the website<small>Browse here. Changes sync when lms.uwezo.go.ke is online again.</small></div>
+<div id="uwezo-offline-banner" data-msg="">Offline</div>
 <script>
 (function(){
   var paths = ${list};
+  function tip(msg){
+    var banner = document.getElementById('uwezo-offline-banner');
+    if (banner) banner.setAttribute('data-msg', msg || '');
+  }
+  function scrubLeak(){
+    try {
+      var root = document.body;
+      if (!root) return;
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var drop = [];
+      var node;
+      while ((node = walker.nextNode())) {
+        var t = node.nodeValue || '';
+        if (t.length < 30) continue;
+        if (/filteredOptions|Select County|Array\\.isArray\\s*\\(\\s*this\\.options|this\\.search|found\\s*&&\\s*found\\[|COUNTY\\s+o\\s*&&|o\\s*&&\\s*o\\['id'\\]/.test(t)) {
+          drop.push(node);
+        }
+      }
+      for (var i = 0; i < drop.length; i++) drop[i].nodeValue = '';
+    } catch (e) {}
+  }
+  scrubLeak();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scrubLeak);
+  else setTimeout(scrubLeak, 0);
   function norm(p){
     try { p = new URL(p, location.href).pathname; } catch(e) {}
     if (p.length > 1 && p.slice(-1) === '/') p = p.slice(0,-1);
@@ -132,21 +178,20 @@ function injectOfflineChrome(html: string, paths: string[]): string {
       ev.stopPropagation();
       var path = norm(href);
       if (paths.indexOf(path) >= 0 || paths.indexOf(path + '/') >= 0) {
+        tip('');
         if (window.UwezoLmsOffline && window.UwezoLmsOffline.openPath) {
           window.UwezoLmsOffline.openPath(path);
           return;
         }
       }
-      var banner = document.getElementById('uwezo-offline-banner');
-      if (banner) banner.querySelector('small').textContent = 'That page is not in the offline copy. Refresh while online to download it.';
+      tip('Page not cached — sync online');
       return;
     }
-    var btn = el.closest('button, [type=submit], [wire\\\\:click], .btn');
+    var btn = el.closest('button, [type=submit], .btn');
     if (btn && !btn.closest('#uwezo-offline-banner')) {
       ev.preventDefault();
       ev.stopPropagation();
-      var banner = document.getElementById('uwezo-offline-banner');
-      if (banner) banner.querySelector('small').textContent = 'Action saved for sync when the LMS is online. Use Encrypted database for offline receipts.';
+      tip('Sync online to save changes');
     }
   }, true);
   document.addEventListener('submit', function(ev){
@@ -182,13 +227,33 @@ async function buildOfflineHtml(host: string, html: string, menuPaths: string[],
     const css = styleCache.get(href) || '';
     if (css) cssChunks.push(`/* ${href} */\n${css}`);
   }
-  let doc = stripLiveScripts(html);
+  let doc = sanitizeOfflineHtml(html);
   // Drop remote stylesheet links; styles are inlined
   doc = doc.replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi, '');
   const styleBlock = `<style id="uwezo-offline-assets">${cssChunks.join('\n')}</style>`;
   if (/<\/head>/i.test(doc)) doc = doc.replace(/<\/head>/i, `${styleBlock}</head>`);
   else doc = styleBlock + doc;
   return injectOfflineChrome(doc, menuPaths);
+}
+
+/** Clean an already-cached offline page (fixes Alpine/JS text leaks on older copies). */
+export function scrubCachedPageHtml(html: string): string {
+  if (!html) return html;
+  const pathMatch = /var paths = (\[[\s\S]*?\]);/.exec(html);
+  let paths: string[] = [];
+  if (pathMatch) {
+    try {
+      paths = JSON.parse(pathMatch[1]) as string[];
+    } catch {
+      paths = [];
+    }
+  }
+  let doc = html;
+  doc = doc.replace(/<style id="uwezo-offline-chrome">[\s\S]*?<\/style>/gi, '');
+  doc = doc.replace(/<div id="uwezo-offline-banner"[^>]*>[\s\S]*?<\/div>/gi, '');
+  doc = doc.replace(/<script>\s*\(function\(\)\{\s*var paths =[\s\S]*?<\/script>/gi, '');
+  doc = sanitizeOfflineHtml(doc);
+  return injectOfflineChrome(doc, paths);
 }
 
 /** Download live LMS screens for offline use (same UI as the website). */

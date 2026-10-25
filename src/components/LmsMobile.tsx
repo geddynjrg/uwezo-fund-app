@@ -15,10 +15,9 @@ import {
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
 import { pendingMutationCount } from '../lib/lmsLocalDb';
-import { hasAnyCachedScreens, loadPageShells, resolveCachedPageHtml } from '../lib/lmsPageShell';
+import { hasAnyCachedScreens, resolveCachedPageHtml } from '../lib/lmsPageShell';
 import { hideLmsEmbed, setLmsEmbedBounds, showLmsEmbed } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
-import { officerCopyStatus } from '../lib/officerVault';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
 import { isUwezoMailbox, setMailboxPassword, standardMailboxPassword } from '../lib/zimbraAuth';
 
@@ -69,8 +68,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const current = pages.find((item) => item.id === page) || pages[0];
   const role = cache?.role || officer.role;
   const showCompare = lmsOnline === true && pending > 0;
-  const vault = lmsDbVaultStatus(officer.email);
-  const shells = loadPageShells(officer.email);
   const showEmbed = section === 'pages';
 
   const syncEmbedBounds = useCallback(async () => {
@@ -131,10 +128,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         setPending(count);
         await openLmsPage(current?.path || '/dashboard', true);
       } else if (hasAnyCachedScreens(officer.email)) {
-        setNotice('Offline — LMS screens inside the app (last synced copy).');
+        setNotice('');
         await openLmsPage(current?.path || '/dashboard', false);
       } else {
-        setNotice('Offline and no LMS screens cached yet. Connect once and tap Refresh to sync.');
+        setNotice('Offline — sync once online');
       }
     })();
     return () => {
@@ -186,7 +183,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     if (!online) {
       const html = await resolveCachedPageHtml(officer.email, pagePath);
       if (!html) {
-        setNotice('No offline copy of this LMS screen. Tap Refresh while online to sync.');
+        setNotice('Screen not cached — Sync online');
         return;
       }
       setBusy(true);
@@ -197,16 +194,12 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           offline: true,
         });
         setBusy(false);
-        setNotice(
-          shown
-            ? `LMS inside the app (offline)${shells?.savedAt ? ` — synced ${new Date(shells.savedAt).toLocaleString()}` : ''}.`
-            : 'Could not show the offline LMS screen.',
-        );
+        setNotice(shown ? '' : 'Could not show offline LMS');
       } else {
         setWebSrc('');
         setWebHtml(html);
         setBusy(false);
-        setNotice('LMS inside the app (offline browser preview).');
+        setNotice('');
       }
       return;
     }
@@ -230,12 +223,12 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         offline: false,
       });
       setBusy(false);
-      setNotice(shown ? 'LMS inside the app — live website UI. Refresh syncs the database.' : 'Could not embed the live LMS.');
+      setNotice(shown ? '' : 'Could not embed LMS');
     } else {
       setWebHtml('');
       setWebSrc(target);
       setBusy(false);
-      setNotice('LMS inside the app (browser). Cookies may require the Android app for full session.');
+      setNotice('');
     }
   }
 
@@ -405,29 +398,21 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             <p className="lms-note">
               {notice
                 || (lmsOnline === null
-                  ? 'Checking lms.uwezo.go.ke…'
+                  ? 'Checking LMS…'
                   : lmsOnline
-                    ? `LMS in-app${pending ? ` · ${pending} change(s) to send` : ''}`
-                    : 'LMS in-app (offline copy)')}
+                    ? `In-app LMS${pending ? ` · ${pending} to send` : ''}`
+                    : 'In-app LMS (offline)')}
             </p>
             <div className="doc-actions">
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>
-                {busy ? 'Syncing…' : 'Sync database'}
+                {busy ? 'Syncing…' : 'Sync'}
               </button>
               {showCompare ? (
                 <button type="button" className="btn-primary" disabled={busy} onClick={() => void sendOfflineChanges()}>
-                  {busy ? 'Sending…' : 'Compare with the LMS'}
+                  {busy ? 'Sending…' : 'Compare'}
                 </button>
               ) : null}
             </div>
-            {(vault || officerCopyStatus(officer.email)?.savedAt) ? (
-              <p className="home-chat-note">
-                {vault ? `Encrypted DB ${new Date(vault.savedAt).toLocaleString()}. ` : ''}
-                {officerCopyStatus(officer.email)?.savedAt
-                  ? `Officer details ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()}.`
-                  : ''}
-              </p>
-            ) : null}
           </div>
           <div className="lms-embed-slot" ref={embedSlot}>
             {!Capacitor.isNativePlatform() ? (
