@@ -140,6 +140,29 @@ public class UwezoNativePlugin extends Plugin {
   }
 
   @PluginMethod
+  public void openLmsSession(PluginCall call) {
+    String url = call.getString("url", "");
+    String cookie = call.getString("cookie", "");
+    if (url == null || url.isEmpty()) {
+      call.reject("Missing LMS url");
+      return;
+    }
+    Activity activity = getActivity();
+    if (activity == null) {
+      call.reject("No activity");
+      return;
+    }
+    Intent intent = new Intent(activity, LmsWebActivity.class);
+    intent.putExtra(LmsWebActivity.EXTRA_URL, url);
+    intent.putExtra(LmsWebActivity.EXTRA_COOKIE, cookie == null ? "" : cookie);
+    intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+    activity.startActivity(intent);
+    JSObject ret = new JSObject();
+    ret.put("opened", true);
+    call.resolve(ret);
+  }
+
+  @PluginMethod
   public void checkForUpdate(PluginCall call) {
     new Thread(
             () -> {

@@ -15,6 +15,7 @@ import {
   type LmsRole,
   type LmsRowAction,
 } from '../lib/lmsSync';
+import { openLmsSession } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
@@ -51,7 +52,9 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [override, setOverride] = useState<LmsPageView | null>(null);
+  const [showPhoneCopy, setShowPhoneCopy] = useState(false);
   const autoRefreshDone = useRef('');
+  const autoOpened = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
   const view = override || (current?.path ? cache?.pages[current.path] : null) || emptyView;
   const role = cache?.role || officer.role;
@@ -73,11 +76,23 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   useEffect(() => {
     if (section !== 'pages') return;
     if (lmsOnline !== true) return;
-    if (cacheHasFigures(cache)) return;
+    if (cacheHasFigures(cache) && cache?.cookie) {
+      if (autoOpened.current !== officer.email) {
+        autoOpened.current = officer.email;
+        void openLivePage(current?.path || '/dashboard');
+      }
+      return;
+    }
     if (autoRefreshDone.current === officer.email) return;
     autoRefreshDone.current = officer.email;
-    void refreshPages();
-    // Pull figures once when an older empty cache is opened.
+    void refreshPages().then(() => {
+      const next = loadLmsCache(officer.email);
+      if (next?.cookie) {
+        autoOpened.current = officer.email;
+        void openLivePage(current?.path || '/dashboard');
+      }
+    });
+    // Pull session once, then open the live LMS.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [officer.email, lmsOnline]);
 
@@ -98,6 +113,31 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     setNotice(synced?.detail || 'Sign in again to download fresh LMS pages.');
     setRevision((value) => value + 1);
     setBusy(false);
+  }
+
+  async function openLivePage(path?: string) {
+    const host = cache?.host || loadLmsCache(officer.email)?.host || 'https://lms.uwezo.go.ke';
+    let cookie = cache?.cookie || loadLmsCache(officer.email)?.cookie || '';
+    if (!cookie) {
+      setNotice('Refreshing LMS sign-in…');
+      await refreshPages();
+      cookie = loadLmsCache(officer.email)?.cookie || '';
+    }
+    if (!cookie) {
+      setNotice('Could not open the live LMS. Tap Refresh session, then try again.');
+      return;
+    }
+    const target = `${host}${path || current?.path || '/dashboard'}`;
+    setBusy(true);
+    setNotice('Opening the live LMS…');
+    const opened = await openLmsSession(target, cookie);
+    setBusy(false);
+    if (!opened) {
+      await openExternal(target);
+      setNotice('Opened the LMS in the browser.');
+      return;
+    }
+    setNotice('Live LMS is open. Every website action works there. Use Back to return here.');
   }
 
   async function runRowAction(action: LmsRowAction) {
@@ -178,6 +218,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 setPage(item.id);
                 setSection('pages');
                 setMenuOpen(false);
+                if (lmsOnline) void openLivePage(item.path);
               }}
             >
               <small>{item.group}</small>
@@ -228,93 +269,104 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             <p className="lms-note">{notice || (lmsOnline === null ? 'Checking lms.uwezo.go.ke…' : officer.syncDetail)}</p>
             <h1>{current?.title || 'LMS'}</h1>
             <p className="lms-lede">
-              Signed in as {officer.email}. {roleLabel(role)} figures and tables from lms.uwezo.go.ke. You stay signed in until you log out.
+              Signed in as {officer.email}. {roleLabel(role)} — same screens and actions as lms.uwezo.go.ke.
               {officerCopyStatus(officer.email)?.savedAt
                 ? ` Officer details were encrypted on this phone ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()} and refresh after 15 days.`
                 : ''}
             </p>
-            {view.summary.length ? (
-              <div className="lms-stats">
-                {view.summary.map((item) => (
-                  <article key={`${item.label}-${item.value}`}>
-                    {item.value ? <strong>{item.value}</strong> : null}
-                    <span>{item.label}</span>
-                    {item.note ? <small>{item.note}</small> : null}
-                  </article>
-                ))}
-              </div>
-            ) : null}
-            {view.tables.map((table, index) => (
-              <div className="lms-table" key={`${table.title}-${index}`}>
-                {table.title ? <h2>{table.title}</h2> : null}
-                {table.rows.length ? (
-                  <table>
-                    {table.headers.length ? (
-                      <thead>
-                        <tr>
-                          {table.headers.map((header) => <th key={header}>{header}</th>)}
-                          {table.rowActions?.some((item) => item.length) ? <th>Actions</th> : null}
-                        </tr>
-                      </thead>
-                    ) : null}
-                    <tbody>
-                      {table.rows.map((row, rowIndex) => (
-                        <tr key={rowIndex}>
-                          {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
-                          {table.rowActions?.some((item) => item.length) ? (
-                            <td>
-                              <div className="lms-row-actions">
-                                {(table.rowActions[rowIndex] || []).map((action) => (
-                                  <button
-                                    key={`${action.method}-${action.params.join('-')}`}
-                                    type="button"
-                                    className="btn-ghost"
-                                    disabled={busy}
-                                    onClick={() => void runRowAction(action)}
-                                  >
-                                    {action.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </td>
-                          ) : null}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'No rows on this list yet.'}</p>
-                )}
-              </div>
-            ))}
-            {view.notes.map((note) => <p key={note}>{note}</p>)}
-            {!view.summary.length && !view.tables.length && !view.notes.length ? (
-              <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'This page has no figures or rows yet. Tap Refresh pages while online.'}</p>
-            ) : null}
-            {cache?.fetchedAt ? <p className="home-chat-note">Saved on this phone {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
-            {current?.path ? (
-              <LmsWork
-                key={current.path}
-                email={officer.email}
-                path={current.path}
-                fields={view.fields || []}
-                actions={view.actions || []}
-                busy={busy}
-                setBusy={setBusy}
-                setNotice={setNotice}
-                onView={setOverride}
-              />
-            ) : null}
-            <div className="doc-actions">
-              <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refreshPages()}>
-                Refresh pages
-              </button>
-              {current?.path && lmsOnline ? (
-                <button type="button" className="btn-ghost" onClick={() => void openExternal(`${cache?.host || 'https://lms.uwezo.go.ke'}${current.path}`)}>
-                  Open this page on the LMS
+            {lmsOnline ? (
+              <div className="doc-actions">
+                <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLivePage(current?.path)}>
+                  {busy ? 'Opening…' : `Open live ${current?.title || 'LMS'}`}
                 </button>
-              ) : null}
-            </div>
+                <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refreshPages()}>
+                  Refresh session
+                </button>
+              </div>
+            ) : (
+              <p className="home-chat-note">Offline — showing the phone copy below. Connect to use every LMS action.</p>
+            )}
+            {lmsOnline ? (
+              <button type="button" className="btn-ghost" onClick={() => setShowPhoneCopy((value) => !value)}>
+                {showPhoneCopy ? 'Hide phone copy' : 'Show phone copy'}
+              </button>
+            ) : null}
+            {(showPhoneCopy || !lmsOnline) ? (
+              <>
+                {view.summary.length ? (
+                  <div className="lms-stats">
+                    {view.summary.map((item) => (
+                      <article key={`${item.label}-${item.value}`}>
+                        {item.value ? <strong>{item.value}</strong> : null}
+                        <span>{item.label}</span>
+                        {item.note ? <small>{item.note}</small> : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+                {view.tables.map((table, index) => (
+                  <div className="lms-table" key={`${table.title}-${index}`}>
+                    {table.title ? <h2>{table.title}</h2> : null}
+                    {table.rows.length ? (
+                      <table>
+                        {table.headers.length ? (
+                          <thead>
+                            <tr>
+                              {table.headers.map((header) => <th key={header}>{header}</th>)}
+                              {table.rowActions?.some((item) => item.length) ? <th>Actions</th> : null}
+                            </tr>
+                          </thead>
+                        ) : null}
+                        <tbody>
+                          {table.rows.map((row, rowIndex) => (
+                            <tr key={rowIndex}>
+                              {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+                              {table.rowActions?.some((item) => item.length) ? (
+                                <td>
+                                  <div className="lms-row-actions">
+                                    {(table.rowActions[rowIndex] || []).map((action) => (
+                                      <button
+                                        key={`${action.method}-${action.params.join('-')}`}
+                                        type="button"
+                                        className="btn-ghost"
+                                        disabled={busy}
+                                        onClick={() => void runRowAction(action)}
+                                      >
+                                        {action.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </td>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'No rows on this list yet.'}</p>
+                    )}
+                  </div>
+                ))}
+                {view.notes.map((note) => <p key={note}>{note}</p>)}
+                {!view.summary.length && !view.tables.length && !view.notes.length ? (
+                  <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'This page has no figures or rows yet. Tap Refresh session while online.'}</p>
+                ) : null}
+                {cache?.fetchedAt ? <p className="home-chat-note">Saved on this phone {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
+                {current?.path ? (
+                  <LmsWork
+                    key={current.path}
+                    email={officer.email}
+                    path={current.path}
+                    fields={view.fields || []}
+                    actions={view.actions || []}
+                    busy={busy}
+                    setBusy={setBusy}
+                    setNotice={setNotice}
+                    onView={setOverride}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </>
         )}
         {section === 'mail' && notice ? <p className="lms-note">{notice}</p> : null}

@@ -1,4 +1,4 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorCookies, CapacitorHttp } from '@capacitor/core';
 
 export type LmsRole = 'constituency' | 'headquarters' | 'secretariat' | 'accountant' | 'staff';
 
@@ -130,6 +130,25 @@ export function loadLmsCache(email: string): LmsCache | null {
 
 export function saveLmsCache(cache: LmsCache) {
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+  if (cache.host && cache.cookie) void installLmsCookies(cache.host, cache.cookie);
+}
+
+/** Push LMS session cookies into the native WebView cookie jar. */
+export async function installLmsCookies(host: string, cookieHeader: string) {
+  if (!Capacitor.isNativePlatform() || !host || !cookieHeader) return;
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!key) continue;
+    try {
+      await CapacitorCookies.setCookie({ url: host, key, value });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function pageHasFigures(view: LmsPageView | null | undefined): boolean {

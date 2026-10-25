@@ -40,6 +40,7 @@ type UwezoNativePlugin = {
     permission?: string;
   }>;
   getVersion(): Promise<NativeVersion>;
+  openLmsSession(options: { url: string; cookie?: string }): Promise<{ opened?: boolean }>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
   installUpdate(): Promise<NativeUpdateInfo>;
   addListener(
@@ -147,6 +148,21 @@ export async function getNativeVersion(): Promise<NativeVersion | null> {
     return await UwezoNative.getVersion();
   } catch {
     return null;
+  }
+}
+
+/** Open the live LMS in a first-party WebView with the app session cookies. */
+export async function openLmsSession(url: string, cookie = ''): Promise<boolean> {
+  if (!url) return false;
+  if (!Capacitor.isNativePlatform()) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return true;
+  }
+  try {
+    const result = await UwezoNative.openLmsSession({ url, cookie });
+    return Boolean(result.opened);
+  } catch {
+    return false;
   }
 }
 
