@@ -395,18 +395,26 @@ async function loginToHost(host: string, email: string, password: string): Promi
   const postedHeaders = Capacitor.isNativePlatform() ? headersOf((posted as { headers?: unknown }).headers) : {};
   const postedStatus = Capacitor.isNativePlatform() ? Number((posted as { status?: number }).status || 0) : (posted as Response).status;
   const postedText = Capacitor.isNativePlatform()
-    ? (typeof (posted as { data?: unknown }).data === 'string' ? String((posted as { data?: unknown }).data) : '')
+    ? bodyText((posted as { data?: unknown }).data)
     : await (posted as Response).text();
   const location = postedHeaders.location || (Capacitor.isNativePlatform() ? '' : (posted as Response).url);
   const session = cookieHeader(`${cookie}; ${postedHeaders['set-cookie'] || ''}`);
-  const rejected = /credentials do not match|invalid email or password|auth\.failed/i.test(postedText) || postedStatus === 422 || postedStatus === 419;
+  if (postedStatus === 429) {
+    return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'Too many sign-in attempts. Wait a minute, then try the same password again.' };
+  }
+  const rejected = /credentials do not match|invalid email or password|these credentials|auth\.failed/i.test(postedText) || postedStatus === 422 || postedStatus === 419;
   const returnedToLogin = /\/login\/?(?:\?|$)/.test(location);
-  const accepted = !rejected && !returnedToLogin && location.length > 0 && (
-    postedStatus === 302 || postedStatus === 303 || (postedStatus >= 200 && postedStatus < 300 && !/name="_token"/.test(postedText))
-  );
-  if (!accepted) return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'The LMS database did not accept this email and password.' };
-  const nextUrl = location.startsWith('http') ? location : `${host}${location.startsWith('/') ? location : '/dashboard'}`;
+  const loginForm = /name="password"/.test(postedText) && /name="email"/.test(postedText) && !/content-wrapper/.test(postedText);
+  if (rejected || returnedToLogin || (loginForm && postedStatus !== 302 && postedStatus !== 303)) {
+    return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'The LMS database did not accept this email and password.' };
+  }
+  const nextUrl = location.startsWith('http')
+    ? location
+    : `${host}${location.startsWith('/') ? location : '/dashboard'}`;
   const landed = await readText(nextUrl, session);
+  const landedLogin = /\/login\/?(?:\?|$)/.test(landed.url)
+    || (/name="password"/.test(landed.text) && /name="email"/.test(landed.text) && !/content-wrapper/.test(landed.text));
+  if (landedLogin) return { ok: false, role: 'staff', cookie: '', html: landed.text, detail: 'The LMS database did not accept this email and password.' };
   const html = `${landed.url}\n${landed.text}`;
   return { ok: true, role: roleFromPage(landed.url || nextUrl, landed.text), cookie: cookieHeader(`${session}; ${landed.setCookie}`), html, detail: '' };
 }
@@ -428,6 +436,35 @@ export async function fetchStaffRole(host: string, email: string): Promise<LmsMa
     };
   } catch {
     return empty;
+  }
+}
+
+export type OfficerProfile = {
+  email: string;
+  name: string;
+  phone: string;
+  idNumber: string;
+  role: LmsRole;
+  constituency: string;
+  base: string;
+};
+
+export async function fetchOfficerProfile(host: string, cookie: string, email: string): Promise<OfficerProfile | null> {
+  try {
+    const loaded = await readText(`${host}/app/me`, cookie);
+    const data = JSON.parse(loaded.text) as Partial<OfficerProfile> & { found?: boolean };
+    if (!data || data.found === false || !data.role) return null;
+    return {
+      email: (data.email || email).trim().toLowerCase(),
+      name: typeof data.name === 'string' ? data.name : '',
+      phone: typeof data.phone === 'string' ? data.phone : '',
+      idNumber: typeof data.idNumber === 'string' ? data.idNumber : '',
+      role: isRole(data.role) ? data.role : 'staff',
+      constituency: typeof data.constituency === 'string' ? data.constituency : '',
+      base: typeof data.base === 'string' ? data.base : '',
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -474,7 +511,7 @@ async function downloadMenu(
   return { role, detail, constituency: name };
 }
 
-export async function syncLmsMailbox(email: string, password: string): Promise<{ authenticated: boolean; role: LmsRole; detail: string; constituency: string }> {
+export async function syncLmsMailbox(email: string, password: string, options?: { refresh?: boolean }): Promise<{ authenticated: boolean; role: LmsRole; detail: string; constituency: string }> {
   const cached = loadLmsCache(email);
   let lastDetail = 'lms.uwezo.go.ke did not answer.';
   try {
@@ -489,6 +526,13 @@ export async function syncLmsMailbox(email: string, password: string): Promise<{
       const landedUrl = signed.html.split('\n')[0] || '';
       const base = mapped.base || constituencyBase(landedUrl);
       const role = mapped.found ? mapped.role : signed.role;
+      const keepPages = options?.refresh === false && cached && Object.keys(cached.pages || {}).length > 0;
+      if (keepPages) {
+        const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
+        const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Officer details on this phone are still within 15 days.`;
+        saveLmsCache({ ...cached, email, role, menu, host, cookie: signed.cookie, detail, fetchedAt: cached.fetchedAt });
+        return { authenticated: true, role, detail, constituency: mapped.constituency };
+      }
       const saved = await downloadMenu(host, email, role, base, mapped.constituency, signed.cookie, 'Signed in.');
       return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
     }

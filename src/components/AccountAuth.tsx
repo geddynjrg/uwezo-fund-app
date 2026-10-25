@@ -20,7 +20,8 @@ import { stopOtpListener } from '../lib/native';
 import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
-import { fetchStaffRole, lmsHostOnline, openLmsFromZimbra, rememberMappedMenu, roleLabel, syncLmsMailbox, type LmsRole } from '../lib/lmsSync';
+import { fetchOfficerProfile, fetchStaffRole, lmsHostOnline, loadLmsCache, openLmsFromZimbra, rememberMappedMenu, roleLabel, saveLmsCache, syncLmsMailbox, type LmsRole, type OfficerProfile } from '../lib/lmsSync';
+import { officerCopyStatus, openOfficerCopy, sealOfficerCopy } from '../lib/officerVault';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
 import { isUwezoMailbox, signInMailbox } from '../lib/zimbraAuth';
 
@@ -139,6 +140,63 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     });
   }
 
+  async function keepOfficerCopy(input: {
+    email: string;
+    password: string;
+    role: LmsRole;
+    constituency: string;
+    syncDetail: string;
+    profile?: OfficerProfile | null;
+  }) {
+    const cache = loadLmsCache(input.email);
+    const savedAt = new Date().toISOString();
+    await sealOfficerCopy(input.password, {
+      profile: {
+        email: input.email,
+        name: input.profile?.name || '',
+        phone: input.profile?.phone || '',
+        idNumber: input.profile?.idNumber || '',
+        role: input.profile?.role || input.role,
+        constituency: input.profile?.constituency || input.constituency,
+        base: input.profile?.base || '',
+      },
+      syncDetail: input.syncDetail,
+      menu: cache?.menu || [],
+      pages: cache?.pages || {},
+      savedAt,
+    });
+  }
+
+  async function restoreOfficerCopy(emailNorm: string, enteredPassword: string) {
+    const status = officerCopyStatus(emailNorm);
+    if (!status) return false;
+    if (status.stale) {
+      setError('Officer details on this phone are 15 days old. Connect to the internet to refresh them.');
+      return true;
+    }
+    const copy = await openOfficerCopy(emailNorm, enteredPassword);
+    if (!copy) return false;
+    saveLmsCache({
+      email: emailNorm,
+      role: copy.profile.role,
+      fetchedAt: copy.savedAt,
+      detail: copy.syncDetail,
+      pages: copy.pages,
+      menu: copy.menu,
+      host: 'https://lms.uwezo.go.ke',
+    });
+    rememberOfficer({
+      email: emailNorm,
+      constituency: copy.profile.constituency || emailNorm,
+      passwordReset: false,
+      role: copy.profile.role,
+      syncDetail: `${copy.syncDetail} Working from the encrypted copy saved on this phone.`,
+      lmsPassword: '',
+      mail: null,
+    });
+    return true;
+  }
+
   async function onLogin(e: FormEvent) {
     e.preventDefault();
     const emailNorm = email.trim().toLowerCase();
@@ -156,48 +214,98 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     setSavedForLater(false);
     try {
       const lmsOnline = await lmsHostOnline();
-      const mailboxPromise = isUwezoMailbox(emailNorm) ? signInMailbox(emailNorm, password) : Promise.resolve(null);
-      const lmsPromise = lmsOnline ? syncLmsMailbox(emailNorm, password) : Promise.resolve(null);
-      const [mailbox, lms] = await Promise.all([mailboxPromise, lmsPromise]);
+      const mailbox = isUwezoMailbox(emailNorm) ? await signInMailbox(emailNorm, password) : null;
       const mailLink = mailbox?.ok
         ? { email: mailbox.email, token: mailbox.token, password: mailbox.password }
         : null;
-      if (lms?.authenticated) {
-        rememberOfficer({
-          email: emailNorm,
-          constituency: lms.constituency || emailNorm,
-          passwordReset: Boolean(mailbox?.ok && mailbox.passwordReset),
-          role: lms.role,
-          syncDetail: lms.detail,
-          lmsPassword: password,
-          mail: mailLink,
-        });
-        return;
-      }
+      const details = officerCopyStatus(emailNorm);
+      const refreshDetails = !details || details.stale;
       if (mailbox?.ok) {
-        const opened = lmsOnline ? await openLmsFromZimbra(mailbox.email, mailbox.token) : null;
-        const mapped = !opened?.authenticated && lmsOnline ? await fetchStaffRole('https://lms.uwezo.go.ke', mailbox.email) : null;
-        if (mapped?.found) rememberMappedMenu(mailbox.email, mapped);
-        const role = opened?.authenticated ? opened.role : (mapped?.found ? mapped.role : 'staff');
+        const opened = lmsOnline && refreshDetails ? await openLmsFromZimbra(mailbox.email, mailbox.token) : null;
+        const mapped = lmsOnline && !opened?.authenticated ? await fetchStaffRole('https://lms.uwezo.go.ke', mailbox.email) : null;
+        if (!opened?.authenticated && mapped?.found) rememberMappedMenu(mailbox.email, mapped);
+        if (!opened?.authenticated && !refreshDetails) {
+          const restored = await openOfficerCopy(emailNorm, password);
+          if (restored) {
+            saveLmsCache({
+              email: emailNorm,
+              role: restored.profile.role,
+              fetchedAt: restored.savedAt,
+              detail: restored.syncDetail,
+              pages: restored.pages,
+              menu: restored.menu,
+              host: loadLmsCache(emailNorm)?.host || 'https://lms.uwezo.go.ke',
+              cookie: loadLmsCache(emailNorm)?.cookie,
+            });
+          }
+        }
+        const role = opened?.authenticated ? opened.role : (mapped?.found ? mapped.role : (loadLmsCache(emailNorm)?.role || 'staff'));
+        const constituency = opened?.constituency || mapped?.constituency || emailNorm;
+        const syncDetail = opened?.authenticated
+          ? opened.detail
+          : ['Signed in with the mailbox.', opened?.detail, mapped?.found ? `This mailbox is mapped as ${roleLabel(role)}.` : '', refreshDetails ? '' : 'Officer details on this phone are still within 15 days.'].filter(Boolean).join(' ');
+        const profile = opened?.authenticated && loadLmsCache(emailNorm)?.host && loadLmsCache(emailNorm)?.cookie
+          ? await fetchOfficerProfile(loadLmsCache(emailNorm)?.host || '', loadLmsCache(emailNorm)?.cookie || '', emailNorm)
+          : mapped?.found
+            ? { email: emailNorm, name: '', phone: '', idNumber: '', role: mapped.role, constituency: mapped.constituency, base: mapped.base }
+            : null;
         rememberOfficer({
           email: mailbox.email,
-          constituency: opened?.constituency || mapped?.constituency || mailbox.email,
+          constituency: profile?.constituency || constituency,
           passwordReset: mailbox.passwordReset,
-          role,
-          syncDetail: opened?.authenticated
-            ? opened.detail
-            : ['Signed in with the mailbox.', opened?.detail, mapped?.found ? `This mailbox is mapped as ${roleLabel(mapped.role)}.` : '', lms?.detail].filter(Boolean).join(' '),
+          role: profile?.role || role,
+          syncDetail,
           lmsPassword: '',
           mail: mailLink,
         });
+        if (refreshDetails || opened?.authenticated) await keepOfficerCopy({ email: mailbox.email, password, role: profile?.role || role, constituency: profile?.constituency || constituency, syncDetail, profile });
         return;
       }
+      if (lmsOnline) {
+        const lms = await syncLmsMailbox(emailNorm, password, { refresh: refreshDetails });
+        if (lms.authenticated) {
+          const cache = loadLmsCache(emailNorm);
+          const profile = cache?.host && cache.cookie ? await fetchOfficerProfile(cache.host, cache.cookie, emailNorm) : null;
+          const syncDetail = refreshDetails
+            ? lms.detail
+            : `${lms.detail} Officer details on this phone are still within 15 days.`;
+          rememberOfficer({
+            email: emailNorm,
+            constituency: profile?.constituency || lms.constituency || emailNorm,
+            passwordReset: false,
+            role: profile?.role || lms.role,
+            syncDetail,
+            lmsPassword: '',
+            mail: mailLink,
+          });
+          await keepOfficerCopy({
+            email: emailNorm,
+            password,
+            role: profile?.role || lms.role,
+            constituency: profile?.constituency || lms.constituency || emailNorm,
+            syncDetail,
+            profile,
+          });
+          return;
+        }
+        if (!isUwezoMailbox(emailNorm)) {
+          setError(lms.detail);
+          return;
+        }
+        const rejected = /did not accept|Too many sign-in/i.test(lms.detail);
+        if (!rejected && await restoreOfficerCopy(emailNorm, password)) return;
+        const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
+        setError([mailboxMessage, lms.detail].filter(Boolean).join(' ') || 'Sign-in was not accepted.');
+        return;
+      }
+      if (isUwezoMailbox(emailNorm) && await restoreOfficerCopy(emailNorm, password)) return;
       if (isUwezoMailbox(emailNorm)) {
         const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
-        setError([mailboxMessage, lms?.detail].filter(Boolean).join(' ') || 'Sign-in was not accepted.');
+        setError(mailboxMessage || 'Could not reach the mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
         return;
       }
     } catch {
+      if (isUwezoMailbox(emailNorm) && await restoreOfficerCopy(emailNorm, password)) return;
       if (isUwezoMailbox(emailNorm)) {
         setError('Could not reach the mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
         return;

@@ -12,6 +12,7 @@ import {
   type LmsRole,
 } from '../lib/lmsSync';
 import { probeOrigin } from '../lib/portalStatus';
+import { officerCopyStatus } from '../lib/officerVault';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
 import { isUwezoMailbox, setMailboxPassword, standardMailboxPassword } from '../lib/zimbraAuth';
 import { openExternal } from '../lib/openLink';
@@ -194,6 +195,9 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             <h1>{current?.title || 'LMS'}</h1>
             <p className="lms-lede">
               Signed in as {officer.email}. {roleLabel(role)} figures and tables from lms.uwezo.go.ke. You stay signed in until you log out.
+              {officerCopyStatus(officer.email)?.savedAt
+                ? ` Officer details were encrypted on this phone ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()} and refresh after 15 days.`
+                : ''}
             </p>
             {view.summary.length ? (
               <div className="lms-stats">

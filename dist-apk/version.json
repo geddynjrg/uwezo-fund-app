@@ -1,6 +1,6 @@
 {
-  "versionCode": 35,
-  "versionName": "1.1.31",
+  "versionCode": 36,
+  "versionName": "1.1.32",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Zimbra sign-in opens the mapped LMS role and mailbox. Mail can be deleted in batches, and compose includes formatting, attachments, and a signature. Reports generate, page changes can be compared before submit, and passport numbers may contain up to 9 digits."
+  "notes": "A mailbox password is checked first. If the mailbox rejects it, the same password is checked in the LMS. Officer details are encrypted on the phone and refreshed every 15 days."
 }
