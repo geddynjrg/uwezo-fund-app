@@ -5,7 +5,8 @@
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { readLmsOfflinePage, saveLmsOfflinePage } from './native';
-import { loadLmsCache, type LmsPage } from './lmsSync';
+import { loadLmsCache, menuForEmail, type LmsPage } from './lmsSync';
+import { lmsDbVaultStatus } from './lmsDbVault';
 
 const SHELL_KEY = 'uwezo.lms.page.shells.v1';
 
@@ -57,6 +58,55 @@ export function hasAnyCachedScreens(email: string): boolean {
   const shells = loadPageShells(email);
   return Boolean(shells && Object.keys(shells.pages).length);
 }
+
+function pageInShells(shells: LmsPageShells | null, path: string): boolean {
+  if (!shells?.pages) return false;
+  if (shells.pages[path]) return true;
+  const normalized = path.endsWith('/') ? path.slice(0, -1) : `${path}/`;
+  return Boolean(shells.pages[normalized] || shells.pages[path.split('?')[0]]);
+}
+
+/** Offline is ready only when every menu screen is cached and the encrypted DB vault exists. */
+export function isLmsOfflineReady(email: string): { ready: boolean; detail: string; screens: number; expected: number; vault: boolean } {
+  const menu = menuForEmail(email);
+  const expected = menu.map((item) => item.path).filter(Boolean).length;
+  const shells = loadPageShells(email);
+  const screens = menu.filter((item) => pageInShells(shells, item.path)).length;
+  const vault = Boolean(lmsDbVaultStatus(email));
+  if (!expected) {
+    return { ready: false, detail: 'No LMS menu for this user yet. Sign in online once.', screens, expected, vault };
+  }
+  if (!vault && screens < expected) {
+    return {
+      ready: false,
+      detail: `Offline not ready — screens ${screens}/${expected}, encrypted DB missing. Sync while online.`,
+      screens,
+      expected,
+      vault,
+    };
+  }
+  if (!vault) {
+    return { ready: false, detail: 'Offline screens saved, but encrypted LMS database is missing. Sync while online.', screens, expected, vault };
+  }
+  if (screens < expected) {
+    return {
+      ready: false,
+      detail: `Encrypted DB saved, but screens ${screens}/${expected}. Sync while online to finish.`,
+      screens,
+      expected,
+      vault,
+    };
+  }
+  return {
+    ready: true,
+    detail: `Offline ready — ${screens} screens + encrypted database.`,
+    screens,
+    expected,
+    vault,
+  };
+}
+
+export type ShellCacheResult = { ok: boolean; detail: string; count: number; expected: number; missing: string[] };
 
 async function fetchText(url: string, cookie: string): Promise<string> {
   const headers: Record<string, string> = { Accept: 'text/html,*/*' };
@@ -256,36 +306,58 @@ export function scrubCachedPageHtml(html: string): string {
   return injectOfflineChrome(doc, paths);
 }
 
-/** Download live LMS screens for offline use (same UI as the website). */
-export async function cacheLmsPageShells(email: string, menu: LmsPage[]): Promise<{ ok: boolean; detail: string; count: number }> {
+/** Download every LMS menu screen for this user (same UI as the website). */
+export async function cacheLmsPageShells(email: string, menu?: LmsPage[]): Promise<ShellCacheResult> {
   const cache = loadLmsCache(email);
   const host = cache?.host || 'https://lms.uwezo.go.ke';
   const cookie = cache?.cookie || '';
-  if (!cookie) return { ok: false, detail: 'Sign in to the LMS first, then refresh to save offline screens.', count: 0 };
+  const list = (menu && menu.length ? menu : menuForEmail(email)).filter((item) => item.path);
+  const paths = [...new Set(list.map((item) => item.path))];
+  if (!cookie) {
+    return { ok: false, detail: 'Sign in to the LMS first, then sync to save offline screens.', count: 0, expected: paths.length, missing: paths };
+  }
+  if (!paths.length) {
+    return { ok: false, detail: 'No LMS pages listed for this user role yet.', count: 0, expected: 0, missing: [] };
+  }
 
-  const paths = menu.map((item) => item.path).filter(Boolean);
+  const previous = loadPageShells(email);
   const styleCache = new Map<string, string>();
-  const pages: Record<string, string> = {};
-  let okCount = 0;
+  const pages: Record<string, string> = { ...(previous?.pages || {}) };
+  const missing: string[] = [];
+  let fresh = 0;
   for (const path of paths) {
     try {
       const raw = await fetchText(`${host}${path}`, cookie);
-      if (!raw || /name="_token"/i.test(raw) && /login/i.test(raw) && raw.length < 8000) continue;
+      if (!raw || (/name="_token"/i.test(raw) && /login/i.test(raw) && raw.length < 8000)) {
+        if (!pageInShells(previous, path)) missing.push(path);
+        continue;
+      }
       pages[path] = await buildOfflineHtml(host, raw, paths, styleCache);
-      okCount += 1;
+      fresh += 1;
     } catch {
-      /* skip failed page */
+      if (!pageInShells(previous, path)) missing.push(path);
     }
   }
-  if (!okCount) return { ok: false, detail: 'Could not download LMS screens for offline use.', count: 0 };
-  for (const [path, html] of Object.entries(pages)) {
-    await saveLmsOfflinePage(path, html);
+
+  const count = paths.filter((path) => Boolean(pages[path])).length;
+  if (!count) {
+    return { ok: false, detail: 'Could not download LMS screens for offline use.', count: 0, expected: paths.length, missing: paths };
   }
+
+  for (const path of paths) {
+    const html = pages[path];
+    if (html) await saveLmsOfflinePage(path, html);
+  }
+
   const all = loadAll();
-  // Keep lightweight index in localStorage (full HTML also on native disk for WebView nav)
   const indexPages: Record<string, string> = {};
   for (const [path, html] of Object.entries(pages)) {
+    if (!paths.includes(path) && !paths.includes(path.split('?')[0])) continue;
     indexPages[path] = html.length > 350000 ? `${html.slice(0, 350000)}<!--trimmed-->` : html;
+  }
+  // Keep any other previously cached paths for this user
+  for (const [path, html] of Object.entries(pages)) {
+    if (!indexPages[path]) indexPages[path] = html.length > 350000 ? `${html.slice(0, 350000)}<!--trimmed-->` : html;
   }
   all[email.trim().toLowerCase()] = {
     email: email.trim().toLowerCase(),
@@ -298,8 +370,9 @@ export async function cacheLmsPageShells(email: string, menu: LmsPage[]): Promis
   } catch {
     const trimmed: Record<string, string> = {};
     let n = 0;
-    for (const [path, html] of Object.entries(pages)) {
-      if (n >= 6) break;
+    for (const path of paths) {
+      const html = pages[path];
+      if (!html || n >= 12) continue;
       trimmed[path] = html.slice(0, 200000);
       n += 1;
     }
@@ -309,7 +382,17 @@ export async function cacheLmsPageShells(email: string, menu: LmsPage[]): Promis
     } catch {
       /* native files still hold full pages */
     }
-    return { ok: true, detail: `Saved ${okCount} LMS screens offline — same UI as the website.`, count: okCount };
   }
-  return { ok: true, detail: `Saved ${okCount} LMS screens offline — same UI as lms.uwezo.go.ke.`, count: okCount };
+
+  const stillMissing = paths.filter((path) => !pages[path]);
+  const ok = stillMissing.length === 0;
+  return {
+    ok,
+    detail: ok
+      ? `Saved all ${count} LMS screens offline (${fresh} refreshed).`
+      : `Saved ${count}/${paths.length} LMS screens (${fresh} refreshed). Missing: ${stillMissing.slice(0, 4).join(', ')}${stillMissing.length > 4 ? '…' : ''}.`,
+    count,
+    expected: paths.length,
+    missing: stillMissing,
+  };
 }

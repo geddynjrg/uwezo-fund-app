@@ -15,7 +15,7 @@ import {
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
 import { pendingMutationCount } from '../lib/lmsLocalDb';
-import { hasAnyCachedScreens, resolveCachedPageHtml } from '../lib/lmsPageShell';
+import { isLmsOfflineReady, resolveCachedPageHtml } from '../lib/lmsPageShell';
 import { hideLmsEmbed, setLmsEmbedBounds, showLmsEmbed } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
@@ -118,20 +118,25 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
 
       if (online) {
         if (!cacheHasFigures(cache) || !cache?.cookie) {
+          setNotice('Signing in to LMS…');
           await refreshSessionQuiet();
         }
-        setNotice('Syncing with the LMS database…');
+        setNotice('Syncing all LMS pages and encrypted data…');
         const synced = await syncLmsLocal(officer.email);
         if (cancelled) return;
-        setNotice(synced.detail);
+        const ready = isLmsOfflineReady(officer.email);
+        setNotice(synced.ok ? ready.detail : synced.detail);
         count = await pendingMutationCount(officer.email);
         setPending(count);
         await openLmsPage(current?.path || '/dashboard', true);
-      } else if (hasAnyCachedScreens(officer.email)) {
-        setNotice('');
-        await openLmsPage(current?.path || '/dashboard', false);
       } else {
-        setNotice('Offline — sync once online');
+        const ready = isLmsOfflineReady(officer.email);
+        if (ready.ready) {
+          setNotice('');
+          await openLmsPage(current?.path || '/dashboard', false);
+        } else {
+          setNotice(ready.detail);
+        }
       }
     })();
     return () => {
@@ -157,12 +162,13 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
 
   async function refresh() {
     setBusy(true);
-    setNotice('Syncing LMS database…');
+    setNotice('Syncing all LMS pages and encrypted data…');
     await refreshSessionQuiet();
     const result = await refreshLmsConnection(officer.email, current?.path || '/dashboard');
     setLmsOnline(result.online);
     setPending(await pendingMutationCount(officer.email));
-    setNotice(result.detail);
+    const ready = isLmsOfflineReady(officer.email);
+    setNotice(result.online ? (result.ok ? ready.detail : result.detail) : ready.ready ? ready.detail : result.detail);
     setRevision((value) => value + 1);
     setBusy(false);
     if (section === 'pages') await openLmsPage(current?.path, result.online);
@@ -400,8 +406,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 || (lmsOnline === null
                   ? 'Checking LMS…'
                   : lmsOnline
-                    ? `In-app LMS${pending ? ` · ${pending} to send` : ''}`
-                    : 'In-app LMS (offline)')}
+                    ? `In-app LMS${pending ? ` · ${pending} to send` : ''}${isLmsOfflineReady(officer.email).ready ? '' : ' · sync needed for offline'}`
+                    : isLmsOfflineReady(officer.email).ready
+                      ? 'In-app LMS (offline)'
+                      : 'Offline — sync once online')}
             </p>
             <div className="doc-actions">
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>

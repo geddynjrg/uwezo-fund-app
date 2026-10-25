@@ -1,7 +1,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { sealLmsDatabase } from './lmsDbVault';
-import { cacheLmsPageShells } from './lmsPageShell';
-import { loadLmsCache, LMS_PAGES } from './lmsSync';
+import { lmsDbVaultStatus, sealLmsDatabase } from './lmsDbVault';
+import { cacheLmsPageShells, isLmsOfflineReady } from './lmsPageShell';
+import { loadLmsCache, menuForEmail } from './lmsSync';
 import {
   LMS_TABLES,
   listOutbox,
@@ -175,46 +175,59 @@ export async function pushLmsMutations(email: string): Promise<SyncResult> {
   };
 }
 
-async function sealIfPossible(email: string) {
+async function sealIfPossible(email: string): Promise<boolean> {
   const password = loadStaffSession()?.password || '';
-  if (password) await sealLmsDatabase(email, password);
+  if (!password) return false;
+  return sealLmsDatabase(email, password);
 }
 
 /**
- * Full data sync with the online LMS database:
+ * Full data sync with the online LMS when reachable:
  * 1) push phone changes
- * 2) pull constituency tables
- * 3) re-download website screens so offline UI matches current LMS data
- * 4) encrypt the offline database
+ * 2) pull constituency tables for this user
+ * 3) download every menu screen for offline use
+ * 4) encrypt the offline database vault
  */
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
+  const cache = loadLmsCache(email);
+  if (!cache?.cookie) {
+    return { ok: false, detail: 'No LMS session on this phone. Sign in again, then sync.' };
+  }
+
   const pushed = await pushLmsMutations(email);
   const pulled = await pullLmsSnapshot(email);
-  const cache = loadLmsCache(email);
-  const menu = cache?.menu?.length ? cache.menu : LMS_PAGES[(cache?.role || 'staff') as keyof typeof LMS_PAGES] || LMS_PAGES.staff;
-  // Always refresh UI shells after a successful DB pull so offline screens show current LMS data
-  const shells =
-    pulled.ok || Boolean(cache?.cookie)
-      ? await cacheLmsPageShells(email, menu)
-      : { ok: false, detail: '', count: 0 };
-  if (pulled.ok || pushed.ok) await sealIfPossible(email);
-  if (!pulled.ok && !pushed.ok) {
-    return { ok: false, detail: `${pushed.detail} ${pulled.detail}`.trim() };
+  const menu = menuForEmail(email);
+  const shells = await cacheLmsPageShells(email, menu);
+
+  let sealed = false;
+  if (pulled.ok) {
+    sealed = await sealIfPossible(email);
+  } else if (lmsDbVaultStatus(email)) {
+    sealed = true;
   }
+
+  const ready = isLmsOfflineReady(email);
   const counts = pulled.meta?.counts
     ? Object.entries(pulled.meta.counts)
         .map(([name, value]) => `${name}:${value}`)
         .join(' ')
     : '';
+  const parts = [
+    pushed.detail,
+    pulled.ok ? `Pulled LMS database${counts ? ` (${counts})` : ''}.` : pulled.detail,
+    shells.detail,
+    sealed
+      ? 'Encrypted LMS database saved on this phone.'
+      : pulled.ok
+        ? 'Could not encrypt LMS database (sign-in password needed on this phone).'
+        : '',
+    ready.ready ? ready.detail : `Not fully offline-ready — ${ready.detail}`,
+  ].filter(Boolean);
+
+  const ok = Boolean(pulled.ok && shells.ok && sealed && ready.ready);
   return {
-    ok: pulled.ok || shells.ok,
-    detail: [
-      pushed.detail,
-      pulled.ok ? `Pulled LMS database${counts ? ` (${counts})` : ''}.` : pulled.detail,
-      shells.detail,
-    ]
-      .filter(Boolean)
-      .join(' '),
+    ok,
+    detail: parts.join(' '),
     meta: pulled.meta || pushed.meta,
   };
 }

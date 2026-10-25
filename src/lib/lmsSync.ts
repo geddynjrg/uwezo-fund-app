@@ -114,6 +114,30 @@ export function roleLabel(role: LmsRole): string {
   return 'staff';
 }
 
+/** Infer /county/constituency base from cached menu paths. */
+export function inferConstituencyBase(menu: LmsPage[] | undefined): string {
+  if (!menu?.length) return '';
+  for (const item of menu) {
+    const match = /^(\/[^/]+\/[^/]+)(?:\/|$)/.exec(item.path || '');
+    if (match && match[1] !== '/hq' && !match[1].startsWith('/secretariat') && !match[1].startsWith('/accountant')) {
+      return match[1];
+    }
+  }
+  return '';
+}
+
+/** Full LMS menu for this officer (role + constituency base), never the empty stub. */
+export function menuForEmail(email: string): LmsPage[] {
+  const cache = loadLmsCache(email);
+  const role = (cache?.role || 'staff') as LmsRole;
+  if (role === 'constituency') {
+    const base = inferConstituencyBase(cache?.menu);
+    if (base) return constituencyMenu(base);
+  }
+  if (cache?.menu && cache.menu.length > 1) return cache.menu;
+  return LMS_PAGES[role] || LMS_PAGES.staff;
+}
+
 export function loadLmsCache(email: string): LmsCache | null {
   try {
     const parsed = JSON.parse(localStorage.getItem(CACHE_KEY) || '') as LmsCache;

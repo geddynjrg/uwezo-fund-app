@@ -1,5 +1,6 @@
 {
-  "versionCode": 47,
-  "versionName": "1.1.43",
-  "apk": "UwezoFund.apk"
+  "versionCode": 48,
+  "versionName": "1.1.44",
+  "apk": "UwezoFund.apk",
+  "notes": "On login when LMS is reachable, sync every menu page and the encrypted constituency database. Offline opens only when both are ready."
 }
