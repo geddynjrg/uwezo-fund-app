@@ -14,7 +14,7 @@ import {
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
 import { pendingMutationCount } from '../lib/lmsLocalDb';
-import { getCachedPageHtml, loadPageShells } from '../lib/lmsPageShell';
+import { hasAnyCachedScreens, loadPageShells, resolveCachedPageHtml } from '../lib/lmsPageShell';
 import { openLmsSession } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
@@ -50,74 +50,57 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const autoRefreshDone = useRef('');
-  const autoOpened = useRef('');
-  const autoDbSync = useRef('');
+  const bootDone = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
   const role = cache?.role || officer.role;
   const showCompare = lmsOnline === true && pending > 0;
   const vault = lmsDbVaultStatus(officer.email);
+  const shells = loadPageShells(officer.email);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (bootDone.current === officer.email) return;
+      bootDone.current = officer.email;
       const staff = loadStaffSession();
       if (staff?.password && lmsDbVaultStatus(officer.email)) {
         await openLmsDatabase(officer.email, staff.password);
       }
-      const count = await pendingMutationCount(officer.email);
+      let count = await pendingMutationCount(officer.email);
       if (!cancelled) setPending(count);
+
       const online = await probeOrigin('https://lms.uwezo.go.ke');
-      if (!cancelled) setLmsOnline(online);
-      if (!cancelled && online && count > 0) {
-        const sent = await compareAndSendOfflineChanges(officer.email);
-        setNotice(sent.detail);
-        setPending(await pendingMutationCount(officer.email));
+      if (cancelled) return;
+      setLmsOnline(online);
+
+      if (online) {
+        // Session + full DB sync (push app changes, pull LMS DB, refresh offline screens)
+        if (!cacheHasFigures(cache) || !cache?.cookie) {
+          await refreshSessionQuiet();
+        }
+        setNotice('Syncing with the LMS database…');
+        const synced = await syncLmsLocal(officer.email);
+        if (cancelled) return;
+        setNotice(synced.detail);
+        count = await pendingMutationCount(officer.email);
+        setPending(count);
+        await openLmsPage(current?.path || '/dashboard', true);
+      } else if (hasAnyCachedScreens(officer.email)) {
+        setNotice('Offline — opening the last synced LMS screens (same UI as the website).');
+        await openLmsPage(current?.path || '/dashboard', false);
+      } else {
+        setNotice('Offline and no LMS screens cached yet. Connect once and tap Refresh to sync the database and download the website UI.');
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [officer.email]);
 
-  useEffect(() => {
-    if (section !== 'pages') return;
-    if (lmsOnline !== true) return;
-    if (cacheHasFigures(cache) && cache?.cookie) {
-      if (autoOpened.current !== officer.email) {
-        autoOpened.current = officer.email;
-        void openLivePage(current?.path || '/dashboard');
-      }
-      if (autoDbSync.current !== officer.email) {
-        autoDbSync.current = officer.email;
-        void syncLmsLocal(officer.email).then(async (result) => {
-          if (result.ok) setNotice(result.detail);
-          setPending(await pendingMutationCount(officer.email));
-        });
-      }
-      return;
-    }
-    if (autoRefreshDone.current === officer.email) return;
-    autoRefreshDone.current = officer.email;
-    void refreshSession().then(() => {
-      const next = loadLmsCache(officer.email);
-      if (next?.cookie) {
-        autoOpened.current = officer.email;
-        void openLivePage(current?.path || '/dashboard');
-        autoDbSync.current = officer.email;
-        void syncLmsLocal(officer.email).then(async (result) => {
-          if (result.ok) setNotice(result.detail);
-          setPending(await pendingMutationCount(officer.email));
-        });
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [officer.email, lmsOnline]);
-
-  async function refreshSession() {
+  async function refreshSessionQuiet() {
     const staff = loadStaffSession();
     if (!staff) return;
-    setBusy(true);
     let synced = staff.password ? await syncLmsMailbox(staff.email, staff.password, { refresh: true }) : null;
     if (!synced?.authenticated && staff.mail?.token) synced = await openLmsFromZimbra(staff.email, staff.mail.token);
     if (synced?.authenticated) {
@@ -128,40 +111,35 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         syncDetail: synced.detail,
       });
     }
-    setNotice(synced?.detail || 'Sign in again to refresh the LMS.');
-    setRevision((value) => value + 1);
-    setBusy(false);
   }
 
   async function refresh() {
     setBusy(true);
-    await refreshSession();
+    setNotice('Checking lms.uwezo.go.ke and syncing the LMS database…');
+    await refreshSessionQuiet();
     const result = await refreshLmsConnection(officer.email, current?.path || '/dashboard');
     setLmsOnline(result.online);
     setPending(await pendingMutationCount(officer.email));
     setNotice(result.detail);
     setRevision((value) => value + 1);
     setBusy(false);
-    if (result.online) void openLivePage(current?.path);
+    await openLmsPage(current?.path, result.online);
   }
 
-  async function openLivePage(path?: string) {
+  async function openLmsPage(path?: string, forceOnline?: boolean) {
     const pagePath = path || current?.path || '/dashboard';
-    const host = cache?.host || loadLmsCache(officer.email)?.host || 'https://lms.uwezo.go.ke';
-    const online = lmsOnline === true ? true : await probeOrigin('https://lms.uwezo.go.ke');
+    const host = loadLmsCache(officer.email)?.host || cache?.host || 'https://lms.uwezo.go.ke';
+    const online = forceOnline === true || (forceOnline !== false && (lmsOnline === true || (await probeOrigin('https://lms.uwezo.go.ke'))));
     if (online !== lmsOnline) setLmsOnline(online);
 
-    // Offline: open the cached website shell — same UX/UI as lms.uwezo.go.ke
     if (!online) {
-      const html = getCachedPageHtml(officer.email, pagePath);
+      const html = await resolveCachedPageHtml(officer.email, pagePath);
       if (!html) {
-        setNotice('No offline copy of this LMS screen yet. Connect once and tap Refresh to download the same screens as the website.');
-        setSection('database');
+        setNotice('No offline copy of this LMS screen. Tap Refresh while online to pull the database and download the same website UI.');
         return;
       }
       setBusy(true);
-      setNotice('Opening offline LMS — same screens as the website…');
-      const opened = await openLmsSession(host + pagePath, '', {
+      const opened = await openLmsSession(`${host}${pagePath}`, '', {
         html,
         baseUrl: `${host}/`,
         offline: true,
@@ -169,16 +147,15 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       setBusy(false);
       setNotice(
         opened
-          ? `Offline LMS open (${loadPageShells(officer.email)?.savedAt ? `saved ${new Date(loadPageShells(officer.email)!.savedAt).toLocaleString()}` : 'cached'}). Same UI as online.`
+          ? `Offline LMS — same UI as the website${shells?.savedAt ? ` (synced ${new Date(shells.savedAt).toLocaleString()})` : ''}.`
           : 'Could not open the offline LMS screen.',
       );
       return;
     }
 
-    let cookie = cache?.cookie || loadLmsCache(officer.email)?.cookie || '';
+    let cookie = loadLmsCache(officer.email)?.cookie || cache?.cookie || '';
     if (!cookie) {
-      setNotice('Refreshing LMS sign-in…');
-      await refreshSession();
+      await refreshSessionQuiet();
       cookie = loadLmsCache(officer.email)?.cookie || '';
     }
     if (!cookie) {
@@ -187,7 +164,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     }
     const target = `${host}${pagePath}`;
     setBusy(true);
-    setNotice('Opening the same LMS screens as lms.uwezo.go.ke…');
     const opened = await openLmsSession(target, cookie);
     setBusy(false);
     if (!opened) {
@@ -195,15 +171,17 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       setNotice('Opened the LMS in the browser.');
       return;
     }
-    setNotice('Live LMS open — same UX/UI as the website. Use Android Back to return here.');
+    setNotice('Live LMS — same UI as lms.uwezo.go.ke. Database syncs on Refresh.');
   }
 
   async function sendOfflineChanges() {
     setBusy(true);
+    setNotice('Sending offline changes and pulling the latest LMS database…');
     const result = await compareAndSendOfflineChanges(officer.email);
     setBusy(false);
     setNotice(result.detail);
     setPending(await pendingMutationCount(officer.email));
+    if (result.ok) await openLmsPage(current?.path, true);
   }
 
   async function changeMailboxPassword() {
@@ -269,7 +247,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 setPage(item.id);
                 setSection('pages');
                 setMenuOpen(false);
-                void openLivePage(item.path);
+                void openLmsPage(item.path);
               }}
             >
               <small>{item.group}</small>
@@ -278,7 +256,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           ))}
           <button type="button" className="lms-link" onClick={() => { setSection('database'); setMenuOpen(false); }}>
             <small>Offline</small>
-            Encrypted LMS database
+            Encrypted database
           </button>
           <button type="button" className="lms-link" onClick={() => { setSection('mail'); setMenuOpen(false); }}>
             <small>Mailbox</small>
@@ -336,23 +314,24 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 || (lmsOnline === null
                   ? 'Checking lms.uwezo.go.ke…'
                   : lmsOnline
-                    ? `Online — same screens as lms.uwezo.go.ke.${pending ? ` ${pending} offline change(s) ready to send.` : ''}`
-                    : 'Offline — using the encrypted LMS database on this phone.')}
+                    ? `Online — same LMS UI as the website. Refresh syncs the database.${pending ? ` ${pending} offline change(s) to send.` : ''}`
+                    : 'Offline — same LMS UI from the last database sync.')}
             </p>
             <h1>{current?.title || 'LMS'}</h1>
             <p className="lms-lede">
-              Signed in as {officer.email}. Menu opens the same LMS screens as the website — live when online, cached copy when offline.
-              {vault ? ` Encrypted database saved ${new Date(vault.savedAt).toLocaleString()}.` : ''}
+              Signed in as {officer.email}. Online and offline both open the website LMS screens.
+              Refresh pulls the LMS database and updates the offline copy.
+              {vault ? ` Encrypted DB saved ${new Date(vault.savedAt).toLocaleString()}.` : ''}
               {officerCopyStatus(officer.email)?.savedAt
                 ? ` Officer details encrypted ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()}.`
                 : ''}
             </p>
             <div className="doc-actions">
-              <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLivePage(current?.path)}>
-                {busy ? 'Opening…' : lmsOnline ? `Open ${current?.title || 'LMS'} (live UI)` : `Open ${current?.title || 'LMS'} (offline UI)`}
+              <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLmsPage(current?.path)}>
+                {busy ? 'Opening…' : `Open ${current?.title || 'LMS'}`}
               </button>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>
-                {busy ? 'Refreshing…' : 'Refresh'}
+                {busy ? 'Syncing…' : 'Refresh / sync database'}
               </button>
               {showCompare ? (
                 <button type="button" className="btn-primary" disabled={busy} onClick={() => void sendOfflineChanges()}>
@@ -363,11 +342,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 Encrypted database
               </button>
             </div>
-            {lmsOnline === false && !getCachedPageHtml(officer.email, current?.path || '') ? (
-              <p className="home-chat-note">
-                Offline and this screen is not cached yet. Tap Refresh when lms.uwezo.go.ke is reachable to download the same website UI for offline use.
-              </p>
-            ) : null}
           </>
         )}
         {section === 'mail' && notice ? <p className="lms-note">{notice}</p> : null}

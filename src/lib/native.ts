@@ -48,6 +48,7 @@ type UwezoNativePlugin = {
     offline?: boolean;
   }): Promise<{ opened?: boolean }>;
   saveLmsOfflinePage(options: { path: string; html: string }): Promise<{ saved?: boolean }>;
+  readLmsOfflinePage(options: { path: string }): Promise<{ found?: boolean; html?: string }>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
   installUpdate(): Promise<NativeUpdateInfo>;
   addListener(
@@ -201,6 +202,19 @@ export async function saveLmsOfflinePage(path: string, html: string): Promise<bo
   } catch {
     return false;
   }
+}
+
+/** Read a cached offline LMS page from native storage (full HTML). */
+export async function readLmsOfflinePage(path: string): Promise<string | null> {
+  if (!path) return null;
+  if (!Capacitor.isNativePlatform()) return null;
+  try {
+    const result = await UwezoNative.readLmsOfflinePage({ path });
+    if (result.found && result.html) return result.html;
+  } catch {
+    /* fall through */
+  }
+  return null;
 }
 
 export async function checkForNativeUpdate(): Promise<NativeUpdateInfo | null> {

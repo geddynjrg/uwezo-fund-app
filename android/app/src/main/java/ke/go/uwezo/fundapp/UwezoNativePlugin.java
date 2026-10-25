@@ -174,6 +174,15 @@ public class UwezoNativePlugin extends Plugin {
     call.resolve(ret);
   }
 
+  private java.io.File lmsOfflinePageFile(String path) {
+    String safe = path == null ? "" : path.replaceAll("[^a-zA-Z0-9._-]+", "_");
+    if (safe.isEmpty()) safe = "root";
+    java.io.File dir = new java.io.File(getContext().getFilesDir(), "lms-offline-pages");
+    //noinspection ResultOfMethodCallIgnored
+    dir.mkdirs();
+    return new java.io.File(dir, safe + ".html");
+  }
+
   @PluginMethod
   public void saveLmsOfflinePage(PluginCall call) {
     String path = call.getString("path", "");
@@ -183,22 +192,58 @@ public class UwezoNativePlugin extends Plugin {
       return;
     }
     try {
-      String safe = path.replaceAll("[^a-zA-Z0-9._-]+", "_");
-      if (safe.isEmpty()) safe = "root";
-      java.io.File dir = new java.io.File(getContext().getFilesDir(), "lms-offline-pages");
-      if (!dir.exists() && !dir.mkdirs()) {
-        call.reject("Could not create offline page folder");
-        return;
-      }
-      java.io.File file = new java.io.File(dir, safe + ".html");
+      java.io.File file = lmsOfflinePageFile(path);
       java.io.FileOutputStream out = new java.io.FileOutputStream(file);
       out.write(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
       out.close();
+      // Also store alternate slash form for nav lookups
+      if (path.endsWith("/")) {
+        java.io.File alt = lmsOfflinePageFile(path.substring(0, path.length() - 1));
+        java.io.FileOutputStream altOut = new java.io.FileOutputStream(alt);
+        altOut.write(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        altOut.close();
+      }
       JSObject ret = new JSObject();
       ret.put("saved", true);
       call.resolve(ret);
     } catch (Exception e) {
       call.reject("Could not save offline page");
+    }
+  }
+
+  @PluginMethod
+  public void readLmsOfflinePage(PluginCall call) {
+    String path = call.getString("path", "");
+    if (path == null || path.isEmpty()) {
+      call.reject("Missing path");
+      return;
+    }
+    try {
+      java.io.File file = lmsOfflinePageFile(path);
+      if (!file.exists()) {
+        String alt = path.endsWith("/") ? path.substring(0, path.length() - 1) : path + "/";
+        file = lmsOfflinePageFile(alt);
+      }
+      JSObject ret = new JSObject();
+      if (!file.exists()) {
+        ret.put("found", false);
+        ret.put("html", "");
+        call.resolve(ret);
+        return;
+      }
+      java.io.FileInputStream in = new java.io.FileInputStream(file);
+      java.io.InputStreamReader reader =
+          new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8);
+      StringBuilder sb = new StringBuilder();
+      char[] buf = new char[8192];
+      int n;
+      while ((n = reader.read(buf)) >= 0) sb.append(buf, 0, n);
+      reader.close();
+      ret.put("found", true);
+      ret.put("html", sb.toString());
+      call.resolve(ret);
+    } catch (Exception e) {
+      call.reject("Could not read offline page");
     }
   }
 

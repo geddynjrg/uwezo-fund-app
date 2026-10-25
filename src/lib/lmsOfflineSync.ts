@@ -180,25 +180,46 @@ async function sealIfPossible(email: string) {
   if (password) await sealLmsDatabase(email, password);
 }
 
-/** Pull then push — keep phone tables aligned with online LMS, then encrypt offline copy. */
+/**
+ * Full data sync with the online LMS database:
+ * 1) push phone changes
+ * 2) pull constituency tables
+ * 3) re-download website screens so offline UI matches current LMS data
+ * 4) encrypt the offline database
+ */
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
   const pushed = await pushLmsMutations(email);
   const pulled = await pullLmsSnapshot(email);
   const cache = loadLmsCache(email);
   const menu = cache?.menu?.length ? cache.menu : LMS_PAGES[(cache?.role || 'staff') as keyof typeof LMS_PAGES] || LMS_PAGES.staff;
-  const shells = pulled.ok || Boolean(cache?.cookie) ? await cacheLmsPageShells(email, menu) : { ok: false, detail: '', count: 0 };
+  // Always refresh UI shells after a successful DB pull so offline screens show current LMS data
+  const shells =
+    pulled.ok || Boolean(cache?.cookie)
+      ? await cacheLmsPageShells(email, menu)
+      : { ok: false, detail: '', count: 0 };
   if (pulled.ok || pushed.ok) await sealIfPossible(email);
   if (!pulled.ok && !pushed.ok) {
     return { ok: false, detail: `${pushed.detail} ${pulled.detail}`.trim() };
   }
+  const counts = pulled.meta?.counts
+    ? Object.entries(pulled.meta.counts)
+        .map(([name, value]) => `${name}:${value}`)
+        .join(' ')
+    : '';
   return {
-    ok: pulled.ok,
-    detail: [pushed.detail, pulled.detail, shells.detail].filter(Boolean).join(' '),
+    ok: pulled.ok || shells.ok,
+    detail: [
+      pushed.detail,
+      pulled.ok ? `Pulled LMS database${counts ? ` (${counts})` : ''}.` : pulled.detail,
+      shells.detail,
+    ]
+      .filter(Boolean)
+      .join(' '),
     meta: pulled.meta || pushed.meta,
   };
 }
 
-/** Send only pending offline database changes when LMS is reachable. */
+/** Send pending offline DB changes, then pull + refresh screens so both sides match. */
 export async function compareAndSendOfflineChanges(email: string): Promise<SyncResult> {
   const online = await probeOrigin('https://lms.uwezo.go.ke');
   if (!online) {
@@ -206,24 +227,14 @@ export async function compareAndSendOfflineChanges(email: string): Promise<SyncR
   }
   const pending = await pendingMutationCount(email);
   if (!pending) {
-    return { ok: true, detail: 'No offline database changes to send.' };
+    // Still pull latest LMS data so the phone matches the server
+    return syncLmsLocal(email);
   }
-  const pushed = await pushLmsMutations(email);
-  if (pushed.ok) {
-    const pulled = await pullLmsSnapshot(email);
-    await sealIfPossible(email);
-    return {
-      ok: true,
-      detail: `${pushed.detail}${pulled.ok ? ` ${pulled.detail}` : ''}`,
-      meta: pulled.meta || pushed.meta,
-    };
-  }
-  return pushed;
+  return syncLmsLocal(email);
 }
 
 /**
- * Refresh while signed in: probe lms.uwezo.go.ke by pulling the current page/session,
- * then refresh the encrypted offline database. Auto-uploads pending changes when online.
+ * Refresh: probe LMS, sync database both ways, refresh offline website screens.
  */
 export async function refreshLmsConnection(email: string, path = '/dashboard'): Promise<SyncResult & { online: boolean }> {
   const online = await probeOrigin('https://lms.uwezo.go.ke');
@@ -231,7 +242,7 @@ export async function refreshLmsConnection(email: string, path = '/dashboard'): 
     return {
       ok: false,
       online: false,
-      detail: 'lms.uwezo.go.ke did not answer. Using the encrypted offline database on this phone.',
+      detail: 'lms.uwezo.go.ke did not answer. Opening the last synced LMS screens offline.',
       meta: await loadLmsMeta(email),
     };
   }
@@ -242,17 +253,14 @@ export async function refreshLmsConnection(email: string, path = '/dashboard'): 
     try {
       await httpJson('GET', `${host}${path.startsWith('/') ? path : `/${path}`}`, cookie);
     } catch {
-      /* probe already passed; page pull is best-effort */
+      /* best-effort page probe */
     }
   }
-  const pending = await pendingMutationCount(email);
   const synced = await syncLmsLocal(email);
   return {
     ok: synced.ok,
     online: true,
-    detail: pending
-      ? `LMS is online. ${synced.detail}`
-      : `LMS is online. Screen refreshed. ${synced.detail}`,
+    detail: `Synced with LMS database. ${synced.detail}`,
     meta: synced.meta,
   };
 }

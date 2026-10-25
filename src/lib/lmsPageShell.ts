@@ -4,7 +4,7 @@
  */
 
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { saveLmsOfflinePage } from './native';
+import { readLmsOfflinePage, saveLmsOfflinePage } from './native';
 import { loadLmsCache, type LmsPage } from './lmsSync';
 
 const SHELL_KEY = 'uwezo.lms.page.shells.v1';
@@ -39,6 +39,18 @@ export function getCachedPageHtml(email: string, path: string): string | null {
   if (shells.pages[path]) return shells.pages[path];
   const normalized = path.endsWith('/') ? path.slice(0, -1) : `${path}/`;
   return shells.pages[normalized] || shells.pages[path.split('?')[0]] || null;
+}
+
+/** Prefer full native-disk HTML, then localStorage index. */
+export async function resolveCachedPageHtml(email: string, path: string): Promise<string | null> {
+  const fromDisk = await readLmsOfflinePage(path);
+  if (fromDisk && fromDisk.length > 200) return fromDisk;
+  return getCachedPageHtml(email, path);
+}
+
+export function hasAnyCachedScreens(email: string): boolean {
+  const shells = loadPageShells(email);
+  return Boolean(shells && Object.keys(shells.pages).length);
 }
 
 async function fetchText(url: string, cookie: string): Promise<string> {
