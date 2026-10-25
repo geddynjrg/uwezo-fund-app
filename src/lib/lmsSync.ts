@@ -125,6 +125,16 @@ export function saveLmsCache(cache: LmsCache) {
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
 }
 
+export function pageHasFigures(view: LmsPageView | null | undefined): boolean {
+  if (!view) return false;
+  return Boolean(view.summary.length || view.tables.length || view.notes.length);
+}
+
+export function cacheHasFigures(cache: LmsCache | null | undefined): boolean {
+  if (!cache?.pages) return false;
+  return Object.values(cache.pages).some((page) => pageHasFigures(page));
+}
+
 function roleFromPage(url: string, html: string): LmsRole {
   let path = url;
   try {
@@ -241,18 +251,69 @@ function contentHtml(html: string): string {
     .replace(/<ol class="breadcrumb[\s\S]*?<\/ol>/gi, ' ');
 }
 
+function formatCount(raw: string, prefix = '', compact = false): string {
+  const amount = Number(String(raw).replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return `${prefix}${raw}`.trim();
+  if (compact && Math.abs(amount) >= 1_000_000_000) {
+    return `${prefix}${(amount / 1_000_000_000).toFixed(2).replace(/\.00$/, '')}B`;
+  }
+  if (compact && Math.abs(amount) >= 1_000_000) {
+    return `${prefix}${(amount / 1_000_000).toFixed(2).replace(/\.00$/, '')}M`;
+  }
+  return `${prefix}${amount.toLocaleString('en-KE')}`;
+}
+
+function countUpValue(block: string, fallback = ''): string {
+  const amount = /data-count-up="([^"]+)"/i.exec(block)?.[1];
+  if (!amount) return fallback;
+  const prefix = decodeEntities(/data-count-prefix="([^"]*)"/i.exec(block)?.[1] || '');
+  const compact = /data-count-compact="true"/i.test(block);
+  return formatCount(amount, prefix, compact);
+}
+
+function isLoginHtml(url: string, html: string): boolean {
+  if (/\/login\/?(?:\?|$)/.test(url)) return true;
+  return /name="password"/.test(html) && /name="email"/.test(html) && !/content-wrapper/.test(html);
+}
+
 export function pageView(html: string): LmsPageView {
   const body = contentHtml(html);
   const summary: LmsSummary[] = [];
+  for (const match of body.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]{0,400}?)<p[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const value = textOf(match[1]);
+    const label = textOf(match[3]);
+    if ((/^\d/.test(value) || /^(KES|Ksh)/i.test(value)) && label) summary.push({ label, value, note: '' });
+  }
   for (const match of body.matchAll(/<h4[^>]*>([\s\S]*?)<\/h4>([\s\S]{0,700}?)<p[^>]*>([\s\S]*?)<\/p>/gi)) {
     const value = textOf(match[1]);
     const label = textOf(match[3]);
     const note = textOf(match[2].match(/<small[^>]*>([\s\S]*?)<\/small>/i)?.[1] || '');
     if (label || value) summary.push({ label: label || 'Figure', value, note });
   }
-  for (const match of body.matchAll(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>/gi)) {
+  for (const match of body.matchAll(/<div class="[^"]*nat-kpi-tile[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi)) {
+    const block = match[0];
+    const label = textOf(/class="[^"]*nat-kpi-tile__label[^"]*"[^>]*>([\s\S]*?)<\//i.exec(block)?.[1] || '');
+    const note = textOf(/class="[^"]*nat-kpi-tile__hint[^"]*"[^>]*>([\s\S]*?)<\//i.exec(block)?.[1] || '');
+    const visible = textOf(/class="[^"]*nat-kpi-tile__value[^"]*"[^>]*>([\s\S]*?)<\//i.exec(block)?.[1] || '');
+    const value = countUpValue(block, visible);
+    if (label && value) summary.push({ label, value, note });
+  }
+  for (const match of body.matchAll(/class="[^"]*kpi-label[^"]*"[^>]*>([\s\S]*?)<\//gi)) {
     const label = textOf(match[1]);
-    if (label) summary.push({ label, value: '', note: 'Assigned' });
+    const after = body.slice(match.index || 0, (match.index || 0) + 500);
+    const value = countUpValue(after, textOf(/class="[^"]*kpi-value[^"]*"[^>]*>([\s\S]*?)<\//i.exec(after)?.[1] || ''));
+    if (label && value) summary.push({ label, value, note: '' });
+  }
+  for (const match of body.matchAll(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>([\s\S]{0,300}?class="info-box-number"[^>]*>([\s\S]*?)<\/span>)?/gi)) {
+    const label = textOf(match[1]);
+    const value = countUpValue(match[0], textOf(match[3] || ''));
+    if (label) summary.push({ label, value, note: value ? '' : 'Assigned' });
+  }
+  for (const match of body.matchAll(/class="info-box-number"[^>]*>([\s\S]*?)<\/span>/gi)) {
+    const value = countUpValue(match[0], textOf(match[1]));
+    const before = body.slice(Math.max(0, (match.index || 0) - 300), match.index || 0);
+    const label = textOf(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>/i.exec(before)?.[1] || '');
+    if (label && value) summary.push({ label, value, note: '' });
   }
   const tables: LmsTable[] = [];
   for (const match of body.matchAll(/<table[\s\S]*?<\/table>/gi)) {
@@ -260,18 +321,22 @@ export function pageView(html: string): LmsPageView {
     const headers = [...block.matchAll(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi)].map((cell) => textOf(cell[1])).filter(Boolean).slice(0, 8);
     const rows = [...block.matchAll(/<tr[\s\S]*?>([\s\S]*?)<\/tr>/gi)].map((row) => (
       [...row[1].matchAll(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi)].map((cell) => textOf(cell[1]).slice(0, 120)).slice(0, 8)
-    )).filter((cells) => cells.some(Boolean)).slice(0, 30);
+    )).filter((cells) => cells.some(Boolean)).slice(0, 40);
     if (headers.length || rows.length) {
       const caption = textOf(block.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i)?.[1] || '');
-      tables.push({ title: caption, headers, rows });
+      const heading = textOf(
+        body.slice(Math.max(0, (match.index || 0) - 400), match.index || 0).match(/<h[1-5][^>]*>([\s\S]*?)<\/h[1-5]>/i)?.[1] || '',
+      );
+      tables.push({ title: caption || heading, headers, rows });
     }
-    if (tables.length >= 3) break;
+    if (tables.length >= 4) break;
   }
   const notes = summary.length || tables.length
     ? []
-    : [...body.matchAll(/<(?:h3|h5|p)[^>]*>([\s\S]*?)<\/(?:h3|h5|p)>/gi)]
+    : [...body.matchAll(/<(?:h1|h3|h5|p)[^>]*>([\s\S]*?)<\/(?:h1|h3|h5|p)>/gi)]
       .map((item) => textOf(item[1]))
-      .filter((item) => item.length > 20 && item.length < 280)
+      .filter((item) => item.length > 8 && item.length < 280)
+      .filter((item) => !/brad diesel|john pierce|nora silvester/i.test(item))
       .slice(0, 5);
   const seen = new Set<string>();
   return {
@@ -280,7 +345,7 @@ export function pageView(html: string): LmsPageView {
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    }).slice(0, 8),
+    }).slice(0, 12),
     tables,
     notes,
     fields: pageFields(html),
@@ -329,8 +394,39 @@ function headersOf(headers: unknown): Record<string, string> {
   return out;
 }
 
-function sessionCookie(setCookie: string): string {
-  const value = cookieHeader(setCookie);
+function rawSetCookies(headers: unknown): string[] {
+  if (!headers || typeof headers !== 'object') return [];
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() !== 'set-cookie') continue;
+    if (Array.isArray(value)) out.push(...value.map((item) => String(item ?? '')));
+    else if (value != null) out.push(String(value));
+  }
+  return out.filter(Boolean);
+}
+
+function mergeSessionCookie(existing: string, setCookies: string | string[]): string {
+  const kept = new Map<string, string>();
+  const takePair = (pair: string) => {
+    const match = /^\s*([A-Za-z0-9_.-]+)=([^;\s].*)$/.exec(pair.trim());
+    if (!match) return;
+    const name = match[1];
+    if (name === 'XSRF-TOKEN' || name.endsWith('_session')) kept.set(name, match[2].trim());
+  };
+  if (existing) {
+    for (const piece of existing.split(';')) takePair(piece);
+  }
+  const list = Array.isArray(setCookies) ? setCookies : String(setCookies || '').split('\n');
+  for (const header of list) {
+    if (!header) continue;
+    // One Set-Cookie line is one cookie. Do not split on commas (Expires uses them).
+    takePair(header.split(';')[0]);
+  }
+  return [...kept.entries()].map(([name, item]) => `${name}=${item}`).join('; ');
+}
+
+function sessionCookie(setCookie: string | string[]): string {
+  const value = mergeSessionCookie('', setCookie);
   return /(?:^|; )[A-Za-z0-9_.-]*_session=/.test(value) ? value : '';
 }
 
@@ -344,11 +440,11 @@ async function readText(url: string, cookie: string): Promise<{ status: number; 
       connectTimeout: 20000,
       readTimeout: 20000,
     });
-    const received = headersOf(response.headers);
+    const setCookies = rawSetCookies(response.headers);
     return {
       status: response.status,
       url: response.url || url,
-      setCookie: received['set-cookie'] || '',
+      setCookie: setCookies.join('\n'),
       text: bodyText(response.data),
     };
   }
@@ -449,7 +545,9 @@ async function loginToHost(host: string, email: string, password: string): Promi
     ? bodyText((posted as { data?: unknown }).data)
     : await (posted as Response).text();
   const location = postedHeaders.location || (Capacitor.isNativePlatform() ? String((posted as { url?: string }).url || '') : (posted as Response).url);
-  const session = sessionCookie(postedHeaders['set-cookie'] || '');
+  const session = Capacitor.isNativePlatform()
+    ? sessionCookie(rawSetCookies((posted as { headers?: unknown }).headers))
+    : sessionCookie((posted as Response).headers.get('set-cookie') || '');
   if (postedStatus === 429) {
     return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'Too many sign-in attempts. Wait a minute, then try the same password again.' };
   }
@@ -551,15 +649,25 @@ async function downloadMenu(
   const pages: Record<string, LmsPageView> = {};
   const seen = new Set<string>();
   let nextCookie = cookie;
+  let signedPages = 0;
   for (const page of menu) {
     if (!page.path || seen.has(page.path)) continue;
     seen.add(page.path);
     const loaded = await readText(`${host}${page.path}`, nextCookie);
-    if (/\/login\/?(?:\?|$)/.test(loaded.url)) continue;
-    nextCookie = cookieHeader(`${nextCookie}; ${loaded.setCookie}`) || nextCookie;
-    pages[page.path] = pageView(loaded.text);
+    nextCookie = mergeSessionCookie(nextCookie, loaded.setCookie ? loaded.setCookie.split('\n') : []);
+    if (isLoginHtml(loaded.url, loaded.text)) continue;
+    if (!/content-wrapper/.test(loaded.text)) continue;
+    const view = pageView(loaded.text);
+    pages[page.path] = view;
+    signedPages += 1;
   }
-  const detail = `${lead} Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Figures and tables from each page are saved on this phone.`;
+  if (!signedPages) {
+    throw new Error('The LMS session did not return dashboard pages.');
+  }
+  const withFigures = Object.values(pages).filter((page) => pageHasFigures(page)).length;
+  const detail = withFigures
+    ? `${lead} Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Figures and tables from each page are saved on this phone.`
+    : `${lead} Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Open Refresh pages if a screen still has no figures.`;
   const name = constituency || (role === 'constituency' ? (base.split('/').filter(Boolean)[1]?.replace(/-/g, ' ') || '') : '');
   saveLmsCache({ email, role, fetchedAt: new Date().toISOString(), detail, pages, menu, host, cookie: nextCookie });
   return { role, detail, constituency: name };
@@ -587,20 +695,43 @@ export async function syncLmsMailbox(email: string, password: string, options?: 
       const landedUrl = signed.html.split('\n')[0] || '';
       const base = mapped.base || constituencyBase(landedUrl);
       const role = mapped.found ? mapped.role : signed.role;
-      const keepPages = options?.refresh === false && cached && Object.keys(cached.pages || {}).length > 0;
-      if (keepPages) {
+      const keepPages = options?.refresh === false && cacheHasFigures(cached);
+      if (keepPages && cached) {
         const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
         const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Officer details on this phone are still within 15 days.`;
-        saveLmsCache({ ...cached, email, role, menu, host, cookie: signed.cookie, detail, fetchedAt: cached.fetchedAt });
+        saveLmsCache({
+          email,
+          role,
+          pages: cached.pages,
+          menu,
+          host,
+          cookie: signed.cookie || cached.cookie,
+          detail,
+          fetchedAt: cached.fetchedAt,
+        });
         return { authenticated: true, role, detail, constituency: mapped.constituency };
       }
       try {
-        const saved = await downloadMenu(host, email, role, base, mapped.constituency, signed.cookie, 'Signed in.');
+        let session = signed.cookie;
+        if (!session) {
+          const probe = await readText(`${host}/dashboard`, '');
+          session = mergeSessionCookie('', probe.setCookie ? probe.setCookie.split('\n') : []);
+          if (!session && !isLoginHtml(probe.url, probe.text) && /content-wrapper/.test(probe.text)) {
+            session = cached?.cookie || '';
+          }
+        }
+        const saved = await downloadMenu(host, email, role, base, mapped.constituency, session, 'Signed in.');
         return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
       } catch {
+        if (cacheHasFigures(cached)) {
+          const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
+          const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. Showing the last figures saved on this phone.`;
+          saveLmsCache({ ...cached!, email, role, menu, host, cookie: signed.cookie || cached?.cookie, detail });
+          return { authenticated: true, role, detail, constituency: mapped.constituency };
+        }
         const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
-        const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. The page copy will finish when the connection is steady.`;
-        saveLmsCache({ email, role, fetchedAt: new Date().toISOString(), detail, pages: cached?.pages || {}, menu, host, cookie: signed.cookie });
+        const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. The page copy will finish when the connection is steady. Use Refresh pages.`;
+        saveLmsCache({ email, role, fetchedAt: new Date().toISOString(), detail, pages: {}, menu, host, cookie: signed.cookie });
         return { authenticated: true, role, detail, constituency: mapped.constituency };
       }
     }
@@ -634,8 +765,7 @@ async function postForm(url: string, cookie: string, referer: string, body: stri
       readTimeout: 20000,
       disableRedirects: true,
     });
-    const received = headersOf(response.headers);
-    return { status: response.status, setCookie: received['set-cookie'] || '', text: bodyText(response.data) };
+    return { status: response.status, setCookie: rawSetCookies(response.headers).join('\n'), text: bodyText(response.data) };
   }
   const response = await fetch(url, {
     method: 'POST',
@@ -645,7 +775,9 @@ async function postForm(url: string, cookie: string, referer: string, body: stri
     redirect: 'manual',
     signal: AbortSignal.timeout(20000),
   });
-  return { status: response.status, setCookie: response.headers.get('set-cookie') || '', text: await response.text() };
+  const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() || [];
+  const setCookie = getSetCookie.length ? getSetCookie.join('\n') : (response.headers.get('set-cookie') || '');
+  return { status: response.status, setCookie, text: await response.text() };
 }
 
 export async function openLmsFromZimbra(email: string, token: string): Promise<{ authenticated: boolean; role: LmsRole; detail: string; constituency: string }> {
@@ -679,7 +811,7 @@ export async function openLmsFromZimbra(email: string, token: string): Promise<{
         role,
         typeof data.base === 'string' ? data.base : '',
         data.constituency || '',
-        cookieHeader(posted.setCookie),
+        sessionCookie(posted.setCookie.split('\n')),
         'Signed in with the mailbox.',
       );
       return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };

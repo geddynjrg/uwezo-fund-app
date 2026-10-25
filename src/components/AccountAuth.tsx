@@ -20,7 +20,7 @@ import { stopOtpListener } from '../lib/native';
 import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
-import { fetchOfficerProfile, fetchStaffRole, lmsHostOnline, loadLmsCache, openLmsFromZimbra, rememberMappedMenu, roleLabel, saveLmsCache, syncLmsMailbox, type LmsRole, type OfficerProfile } from '../lib/lmsSync';
+import { cacheHasFigures, fetchOfficerProfile, fetchStaffRole, lmsHostOnline, loadLmsCache, openLmsFromZimbra, rememberMappedMenu, roleLabel, saveLmsCache, syncLmsMailbox, type LmsRole, type OfficerProfile } from '../lib/lmsSync';
 import { openApplicantCopy, sealApplicantCopy } from '../lib/applicantVault';
 import { clearPublishedRecords, publishApplicantRecords, pullApplicantRecords, recordsNote } from '../lib/applicantRecords';
 import { officerCopyStatus, openOfficerCopy, sealOfficerCopy } from '../lib/officerVault';
@@ -238,7 +238,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
         ? { email: mailbox.email, token: mailbox.token, password: mailbox.password }
         : null;
       const details = officerCopyStatus(emailNorm);
-      const refreshDetails = !details || details.stale;
+      const refreshDetails = !details || details.stale || !cacheHasFigures(loadLmsCache(emailNorm));
       if (mailbox?.ok) {
         const opened = lmsOnline && refreshDetails ? await openLmsFromZimbra(mailbox.email, mailbox.token) : null;
         const mapped = lmsOnline && !opened?.authenticated ? await fetchStaffRole('https://lms.uwezo.go.ke', mailbox.email) : null;

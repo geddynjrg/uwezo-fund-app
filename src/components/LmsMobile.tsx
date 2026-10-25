@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LmsWork } from './LmsWork';
 import { MailBox } from './MailBox';
 import {
   LMS_PAGES,
+  cacheHasFigures,
   loadLmsCache,
   openLmsFromZimbra,
   roleLabel,
@@ -47,6 +48,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [override, setOverride] = useState<LmsPageView | null>(null);
+  const autoRefreshDone = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
   const view = override || (current?.path ? cache?.pages[current.path] : null) || emptyView;
   const role = cache?.role || officer.role;
@@ -65,11 +67,22 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     setOverride(null);
   }, [page, revision]);
 
+  useEffect(() => {
+    if (section !== 'pages') return;
+    if (lmsOnline !== true) return;
+    if (cacheHasFigures(cache)) return;
+    if (autoRefreshDone.current === officer.email) return;
+    autoRefreshDone.current = officer.email;
+    void refreshPages();
+    // Pull figures once when an older empty cache is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [officer.email, lmsOnline]);
+
   async function refreshPages() {
     const staff = loadStaffSession();
     if (!staff) return;
     setBusy(true);
-    let synced = staff.password ? await syncLmsMailbox(staff.email, staff.password) : null;
+    let synced = staff.password ? await syncLmsMailbox(staff.email, staff.password, { refresh: true }) : null;
     if (!synced?.authenticated && staff.mail?.token) synced = await openLmsFromZimbra(staff.email, staff.mail.token);
     if (synced?.authenticated) {
       saveStaffSession({

@@ -1,6 +1,6 @@
 {
-  "versionCode": 37,
-  "versionName": "1.1.33",
+  "versionCode": 38,
+  "versionName": "1.1.34",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "A mailbox is checked first. If it rejects the password, the LMS password is accepted directly, including headquarters accounts. Majuu and Loans applicants keep an encrypted copy of their records on the phone and can sign in again without internet."
+  "notes": "HQ and other LMS pages now keep the live figures and tables. Empty phone copies are refreshed. KPI amounts use the LMS values, not the animated zero placeholders."
 }
