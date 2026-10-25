@@ -1,6 +1,5 @@
 {
-  "versionCode": 40,
-  "versionName": "1.1.36",
-  "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "Cleaner LMS screens without modal junk. Create phases, edit phase details, approve and list actions match the online LMS. Applied Loans empty state is explained. Dashboard, groups, loans, receipts, reports, and upload follow the online pattern."
+  "versionCode": 41,
+  "versionName": "1.1.37",
+  "notes": "Live LMS in-app: every website action (Approval Tasks, uploads, Livewire) opens signed-in. Majuu cleanup for erroneous turkanaeast applicant."
 }
