@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { sealLmsDatabase } from './lmsDbVault';
-import { loadLmsCache } from './lmsSync';
+import { cacheLmsPageShells } from './lmsPageShell';
+import { loadLmsCache, LMS_PAGES } from './lmsSync';
 import {
   LMS_TABLES,
   listOutbox,
@@ -183,13 +184,16 @@ async function sealIfPossible(email: string) {
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
   const pushed = await pushLmsMutations(email);
   const pulled = await pullLmsSnapshot(email);
+  const cache = loadLmsCache(email);
+  const menu = cache?.menu?.length ? cache.menu : LMS_PAGES[(cache?.role || 'staff') as keyof typeof LMS_PAGES] || LMS_PAGES.staff;
+  const shells = pulled.ok || Boolean(cache?.cookie) ? await cacheLmsPageShells(email, menu) : { ok: false, detail: '', count: 0 };
   if (pulled.ok || pushed.ok) await sealIfPossible(email);
   if (!pulled.ok && !pushed.ok) {
     return { ok: false, detail: `${pushed.detail} ${pulled.detail}`.trim() };
   }
   return {
     ok: pulled.ok,
-    detail: [pushed.detail, pulled.detail].filter(Boolean).join(' '),
+    detail: [pushed.detail, pulled.detail, shells.detail].filter(Boolean).join(' '),
     meta: pulled.meta || pushed.meta,
   };
 }

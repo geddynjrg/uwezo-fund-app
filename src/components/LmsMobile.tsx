@@ -1,24 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LmsOffline } from './LmsOffline';
-import { LmsWork } from './LmsWork';
 import { MailBox } from './MailBox';
 import {
   LMS_PAGES,
   cacheHasFigures,
   loadLmsCache,
   openLmsFromZimbra,
-  pageKit,
   roleLabel,
-  runLmsAction,
   syncLmsMailbox,
-  type LmsPageView,
   type LmsRole,
-  type LmsRowAction,
 } from '../lib/lmsSync';
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
 import { pendingMutationCount } from '../lib/lmsLocalDb';
+import { getCachedPageHtml, loadPageShells } from '../lib/lmsPageShell';
 import { openLmsSession } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
@@ -40,10 +36,8 @@ type LmsMobileProps = {
   onLogout: () => void;
 };
 
-const emptyView: LmsPageView = { summary: [], tables: [], notes: [], fields: [], actions: [] };
-
 export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
-  const [revision, setRevision] = useState(0);
+  const [, setRevision] = useState(0);
   const cache = loadLmsCache(officer.email);
   const pages = (cache?.menu && cache.menu.length ? cache.menu : LMS_PAGES[officer.role]) || LMS_PAGES.staff;
   const [page, setPage] = useState(pages[0]?.id || 'dashboard');
@@ -56,12 +50,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [override, setOverride] = useState<LmsPageView | null>(null);
   const autoRefreshDone = useRef('');
   const autoOpened = useRef('');
   const autoDbSync = useRef('');
   const current = pages.find((item) => item.id === page) || pages[0];
-  const view = override || (current?.path ? cache?.pages[current.path] : null) || emptyView;
   const role = cache?.role || officer.role;
   const showCompare = lmsOnline === true && pending > 0;
   const vault = lmsDbVaultStatus(officer.email);
@@ -87,10 +79,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       cancelled = true;
     };
   }, [officer.email]);
-
-  useEffect(() => {
-    setOverride(null);
-  }, [page, revision]);
 
   useEffect(() => {
     if (section !== 'pages') return;
@@ -158,7 +146,35 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   }
 
   async function openLivePage(path?: string) {
+    const pagePath = path || current?.path || '/dashboard';
     const host = cache?.host || loadLmsCache(officer.email)?.host || 'https://lms.uwezo.go.ke';
+    const online = lmsOnline === true ? true : await probeOrigin('https://lms.uwezo.go.ke');
+    if (online !== lmsOnline) setLmsOnline(online);
+
+    // Offline: open the cached website shell — same UX/UI as lms.uwezo.go.ke
+    if (!online) {
+      const html = getCachedPageHtml(officer.email, pagePath);
+      if (!html) {
+        setNotice('No offline copy of this LMS screen yet. Connect once and tap Refresh to download the same screens as the website.');
+        setSection('database');
+        return;
+      }
+      setBusy(true);
+      setNotice('Opening offline LMS — same screens as the website…');
+      const opened = await openLmsSession(host + pagePath, '', {
+        html,
+        baseUrl: `${host}/`,
+        offline: true,
+      });
+      setBusy(false);
+      setNotice(
+        opened
+          ? `Offline LMS open (${loadPageShells(officer.email)?.savedAt ? `saved ${new Date(loadPageShells(officer.email)!.savedAt).toLocaleString()}` : 'cached'}). Same UI as online.`
+          : 'Could not open the offline LMS screen.',
+      );
+      return;
+    }
+
     let cookie = cache?.cookie || loadLmsCache(officer.email)?.cookie || '';
     if (!cookie) {
       setNotice('Refreshing LMS sign-in…');
@@ -169,7 +185,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       setNotice('Could not open the live LMS. Tap Refresh, then try again.');
       return;
     }
-    const target = `${host}${path || current?.path || '/dashboard'}`;
+    const target = `${host}${pagePath}`;
     setBusy(true);
     setNotice('Opening the same LMS screens as lms.uwezo.go.ke…');
     const opened = await openLmsSession(target, cookie);
@@ -188,24 +204,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     setBusy(false);
     setNotice(result.detail);
     setPending(await pendingMutationCount(officer.email));
-  }
-
-  async function runRowAction(action: LmsRowAction) {
-    if (!current?.path) return;
-    setBusy(true);
-    setNotice('');
-    const result = await runLmsAction(officer.email, current.path, {
-      __action: action.method,
-      __params: JSON.stringify(action.params),
-      __id: String(action.params[0] ?? ''),
-      editingPhaseId: String(action.params[0] ?? ''),
-    });
-    setBusy(false);
-    setNotice(result.detail);
-    if (result.ok) {
-      setOverride(result.view);
-      setRevision((value) => value + 1);
-    }
   }
 
   async function changeMailboxPassword() {
@@ -271,7 +269,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 setPage(item.id);
                 setSection('pages');
                 setMenuOpen(false);
-                if (lmsOnline) void openLivePage(item.path);
+                void openLivePage(item.path);
               }}
             >
               <small>{item.group}</small>
@@ -343,18 +341,16 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             </p>
             <h1>{current?.title || 'LMS'}</h1>
             <p className="lms-lede">
-              Signed in as {officer.email}. Menu items open the live LMS UI when the server is reachable.
-              {vault ? ` Encrypted offline copy saved ${new Date(vault.savedAt).toLocaleString()}.` : ''}
+              Signed in as {officer.email}. Menu opens the same LMS screens as the website — live when online, cached copy when offline.
+              {vault ? ` Encrypted database saved ${new Date(vault.savedAt).toLocaleString()}.` : ''}
               {officerCopyStatus(officer.email)?.savedAt
                 ? ` Officer details encrypted ${new Date(officerCopyStatus(officer.email)?.savedAt || '').toLocaleDateString()}.`
                 : ''}
             </p>
             <div className="doc-actions">
-              {lmsOnline ? (
-                <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLivePage(current?.path)}>
-                  {busy ? 'Opening…' : `Open ${current?.title || 'LMS'} (live UI)`}
-                </button>
-              ) : null}
+              <button type="button" className="btn-primary" disabled={busy} onClick={() => void openLivePage(current?.path)}>
+                {busy ? 'Opening…' : lmsOnline ? `Open ${current?.title || 'LMS'} (live UI)` : `Open ${current?.title || 'LMS'} (offline UI)`}
+              </button>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>
                 {busy ? 'Refreshing…' : 'Refresh'}
               </button>
@@ -367,82 +363,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 Encrypted database
               </button>
             </div>
-            {!lmsOnline ? (
-              <>
-                {view.summary.length ? (
-                  <div className="lms-stats">
-                    {view.summary.map((item) => (
-                      <article key={`${item.label}-${item.value}`}>
-                        {item.value ? <strong>{item.value}</strong> : null}
-                        <span>{item.label}</span>
-                        {item.note ? <small>{item.note}</small> : null}
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
-                {view.tables.map((table, index) => (
-                  <div className="lms-table" key={`${table.title}-${index}`}>
-                    {table.title ? <h2>{table.title}</h2> : null}
-                    {table.rows.length ? (
-                      <table>
-                        {table.headers.length ? (
-                          <thead>
-                            <tr>
-                              {table.headers.map((header) => <th key={header}>{header}</th>)}
-                              {table.rowActions?.some((item) => item.length) ? <th>Actions</th> : null}
-                            </tr>
-                          </thead>
-                        ) : null}
-                        <tbody>
-                          {table.rows.map((row, rowIndex) => (
-                            <tr key={rowIndex}>
-                              {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
-                              {table.rowActions?.some((item) => item.length) ? (
-                                <td>
-                                  <div className="lms-row-actions">
-                                    {(table.rowActions[rowIndex] || []).map((action) => (
-                                      <button
-                                        key={`${action.method}-${action.params.join('-')}`}
-                                        type="button"
-                                        className="btn-ghost"
-                                        disabled={busy}
-                                        onClick={() => void runRowAction(action)}
-                                      >
-                                        {action.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </td>
-                              ) : null}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'No rows on this list yet.'}</p>
-                    )}
-                  </div>
-                ))}
-                {view.notes.map((note) => <p key={note}>{note}</p>)}
-                {!view.summary.length && !view.tables.length && !view.notes.length ? (
-                  <p className="home-chat-note">Offline. Open Encrypted database, or tap Refresh when lms.uwezo.go.ke is back.</p>
-                ) : null}
-                {current?.path ? (
-                  <LmsWork
-                    key={current.path}
-                    email={officer.email}
-                    path={current.path}
-                    fields={view.fields || []}
-                    actions={view.actions || []}
-                    busy={busy}
-                    setBusy={setBusy}
-                    setNotice={setNotice}
-                    onView={setOverride}
-                    showCompareWithLms={showCompare}
-                    onCompared={() => void pendingMutationCount(officer.email).then(setPending)}
-                  />
-                ) : null}
-              </>
+            {lmsOnline === false && !getCachedPageHtml(officer.email, current?.path || '') ? (
+              <p className="home-chat-note">
+                Offline and this screen is not cached yet. Tap Refresh when lms.uwezo.go.ke is reachable to download the same website UI for offline use.
+              </p>
             ) : null}
           </>
         )}

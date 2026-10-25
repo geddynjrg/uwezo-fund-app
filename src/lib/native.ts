@@ -40,7 +40,14 @@ type UwezoNativePlugin = {
     permission?: string;
   }>;
   getVersion(): Promise<NativeVersion>;
-  openLmsSession(options: { url: string; cookie?: string }): Promise<{ opened?: boolean }>;
+  openLmsSession(options: {
+    url?: string;
+    cookie?: string;
+    html?: string;
+    baseUrl?: string;
+    offline?: boolean;
+  }): Promise<{ opened?: boolean }>;
+  saveLmsOfflinePage(options: { path: string; html: string }): Promise<{ saved?: boolean }>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
   installUpdate(): Promise<NativeUpdateInfo>;
   addListener(
@@ -151,16 +158,46 @@ export async function getNativeVersion(): Promise<NativeVersion | null> {
   }
 }
 
-/** Open the live LMS in a first-party WebView with the app session cookies. */
-export async function openLmsSession(url: string, cookie = ''): Promise<boolean> {
-  if (!url) return false;
+/** Open the live LMS (or an offline HTML shell) in a first-party WebView. */
+export async function openLmsSession(
+  url: string,
+  cookie = '',
+  options?: { html?: string; baseUrl?: string; offline?: boolean },
+): Promise<boolean> {
+  if (!url && !options?.html) return false;
   if (!Capacitor.isNativePlatform()) {
-    window.open(url, '_blank', 'noopener,noreferrer');
-    return true;
+    if (options?.html) {
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.open();
+        win.document.write(options.html);
+        win.document.close();
+        return true;
+      }
+    }
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    return Boolean(url);
   }
   try {
-    const result = await UwezoNative.openLmsSession({ url, cookie });
+    const result = await UwezoNative.openLmsSession({
+      url: url || options?.baseUrl || 'https://lms.uwezo.go.ke/',
+      cookie,
+      html: options?.html,
+      baseUrl: options?.baseUrl || 'https://lms.uwezo.go.ke/',
+      offline: Boolean(options?.offline || options?.html),
+    });
     return Boolean(result.opened);
+  } catch {
+    return false;
+  }
+}
+
+/** Persist one offline LMS page for in-WebView navigation. */
+export async function saveLmsOfflinePage(path: string, html: string): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || !path || !html) return false;
+  try {
+    const result = await UwezoNative.saveLmsOfflinePage({ path, html });
+    return Boolean(result.saved);
   } catch {
     return false;
   }

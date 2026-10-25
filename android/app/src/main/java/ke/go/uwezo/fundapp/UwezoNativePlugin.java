@@ -143,7 +143,10 @@ public class UwezoNativePlugin extends Plugin {
   public void openLmsSession(PluginCall call) {
     String url = call.getString("url", "");
     String cookie = call.getString("cookie", "");
-    if (url == null || url.isEmpty()) {
+    String html = call.getString("html", "");
+    String baseUrl = call.getString("baseUrl", "https://lms.uwezo.go.ke/");
+    boolean offline = Boolean.TRUE.equals(call.getBoolean("offline", false));
+    if ((url == null || url.isEmpty()) && (html == null || html.isEmpty())) {
       call.reject("Missing LMS url");
       return;
     }
@@ -152,14 +155,51 @@ public class UwezoNativePlugin extends Plugin {
       call.reject("No activity");
       return;
     }
+    if (html != null && !html.isEmpty()) {
+      LmsHtmlHold.html = html;
+      LmsHtmlHold.baseUrl = baseUrl == null || baseUrl.isEmpty() ? "https://lms.uwezo.go.ke/" : baseUrl;
+      LmsHtmlHold.offline = true;
+      offline = true;
+    } else {
+      LmsHtmlHold.clear();
+    }
     Intent intent = new Intent(activity, LmsWebActivity.class);
-    intent.putExtra(LmsWebActivity.EXTRA_URL, url);
+    intent.putExtra(LmsWebActivity.EXTRA_URL, url == null ? "" : url);
     intent.putExtra(LmsWebActivity.EXTRA_COOKIE, cookie == null ? "" : cookie);
+    intent.putExtra(LmsWebActivity.EXTRA_OFFLINE, offline);
     intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     activity.startActivity(intent);
     JSObject ret = new JSObject();
     ret.put("opened", true);
     call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void saveLmsOfflinePage(PluginCall call) {
+    String path = call.getString("path", "");
+    String html = call.getString("html", "");
+    if (path == null || path.isEmpty() || html == null || html.isEmpty()) {
+      call.reject("Missing page");
+      return;
+    }
+    try {
+      String safe = path.replaceAll("[^a-zA-Z0-9._-]+", "_");
+      if (safe.isEmpty()) safe = "root";
+      java.io.File dir = new java.io.File(getContext().getFilesDir(), "lms-offline-pages");
+      if (!dir.exists() && !dir.mkdirs()) {
+        call.reject("Could not create offline page folder");
+        return;
+      }
+      java.io.File file = new java.io.File(dir, safe + ".html");
+      java.io.FileOutputStream out = new java.io.FileOutputStream(file);
+      out.write(html.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      out.close();
+      JSObject ret = new JSObject();
+      ret.put("saved", true);
+      call.resolve(ret);
+    } catch (Exception e) {
+      call.reject("Could not save offline page");
+    }
   }
 
   @PluginMethod
