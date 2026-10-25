@@ -96,18 +96,51 @@ export async function readMail(token: string, id: string) {
   return call(token, `<GetMsgRequest xmlns="urn:zimbraMail"><m id="${xmlEscape(id)}" html="1"/></GetMsgRequest>`);
 }
 
-function messageXml(to: string, subject: string, body: string): string {
-  return `<m><e t="t" a="${xmlEscape(to)}"/><su>${xmlEscape(subject)}</su><mp ct="text/plain"><content>${xmlEscape(body)}</content></mp></m>`;
+export type MailAttachment = { name: string; type: string; base64: string };
+
+export type MailPayload = {
+  to: string;
+  subject: string;
+  html: string;
+  attachments?: MailAttachment[];
+  signature?: MailAttachment | null;
+};
+
+function plainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
-export async function sendMail(token: string, to: string, subject: string, body: string) {
-  return call(token, `<SendMsgRequest xmlns="urn:zimbraMail">${messageXml(to, subject, body)}</SendMsgRequest>`);
+function messageXml(message: MailPayload): string {
+  const html = message.html || '<div></div>';
+  const text = plainText(html) || message.subject;
+  const signature = message.signature
+    ? `<mp ct="${xmlEscape(message.signature.type)}" filename="${xmlEscape(message.signature.name)}" ci="&lt;signature@uwezo&gt;"><content>${message.signature.base64}</content></mp>`
+    : '';
+  const files = (message.attachments || [])
+    .map((file) => `<mp ct="${xmlEscape(file.type || 'application/octet-stream')}" filename="${xmlEscape(file.name)}"><content>${file.base64}</content></mp>`)
+    .join('');
+  const related = `<mp ct="multipart/related"><mp ct="multipart/alternative"><mp ct="text/plain"><content>${xmlEscape(text)}</content></mp><mp ct="text/html"><content>${xmlEscape(html)}</content></mp></mp>${signature}</mp>`;
+  const body = files ? `<mp ct="multipart/mixed">${related}${files}</mp>` : related;
+  return `<m><e t="t" a="${xmlEscape(message.to)}"/><su>${xmlEscape(message.subject)}</su>${body}</m>`;
 }
 
-export async function saveDraft(token: string, to: string, subject: string, body: string) {
-  return call(token, `<SaveDraftRequest xmlns="urn:zimbraMail">${messageXml(to, subject, body)}</SaveDraftRequest>`);
+export async function sendMail(token: string, message: MailPayload) {
+  return call(token, `<SendMsgRequest xmlns="urn:zimbraMail">${messageXml(message)}</SendMsgRequest>`);
 }
 
-export async function moveMail(token: string, id: string, op: 'trash' | 'spam' | 'archive' | 'delete') {
+export async function saveDraft(token: string, message: MailPayload) {
+  return call(token, `<SaveDraftRequest xmlns="urn:zimbraMail">${messageXml(message)}</SaveDraftRequest>`);
+}
+
+export async function moveMail(token: string, ids: string | string[], op: 'trash' | 'spam' | 'archive' | 'delete') {
+  const id = (Array.isArray(ids) ? ids : [ids]).filter(Boolean).join(',');
+  if (!id) return { ok: false, xml: '', authFailed: false, detail: 'Select a message first.' };
   return call(token, `<MsgActionRequest xmlns="urn:zimbraMail"><action id="${xmlEscape(id)}" op="${op}"/></MsgActionRequest>`);
 }

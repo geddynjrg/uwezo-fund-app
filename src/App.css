@@ -619,6 +619,41 @@
   border-radius: 12px;
 }
 
+.mail-toolbar,
+.mail-row,
+.lms-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.mail-row {
+  align-items: flex-start;
+}
+
+.mail-row .application-card {
+  flex: 1;
+}
+
+.mail-editor {
+  min-height: 8rem;
+  padding: 0.7rem;
+  border: 1px solid var(--uf-line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.lms-fields fieldset {
+  border: 1px solid var(--uf-line);
+  border-radius: 12px;
+  margin: 0 0 0.7rem;
+}
+
+.lms-diff td {
+  background: #fff6e8;
+}
+
 .offline-member {
   display: flex;
   flex-direction: column;

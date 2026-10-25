@@ -349,7 +349,7 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
     if (mode === 'individual' && title === 'Individual Information') {
       const passport = person.passportNo.trim().toUpperCase();
       if (!person.recruitmentLocked.includes('passportNo') && !isKenyanPassport(passport)) {
-        setError('Enter a Kenyan passport number: one or two capital letters followed by 7 digits, such as A1234567 or AK1234567.');
+        setError('Enter a Kenyan passport number: one or two capital letters followed by up to 9 digits, such as A1234567 or AK123456789.');
         return;
       }
       setPerson({ ...person, passportNo: passport });

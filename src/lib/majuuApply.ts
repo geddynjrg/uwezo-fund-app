@@ -13,8 +13,8 @@ export const GROUP_PURPOSE = 'Seek Funds to facilitate travel abroad for jobs';
 export const GROUP_ACTIVITIES = 'Travelling Abroad for Work';
 export const MAJUU_LMS_URL = 'https://majuu.uwezo.go.ke/lms';
 export const INDIVIDUAL_LOAN_CAP = 166666;
-/** Ordinary Kenyan passport (A1234567) and ePassport (AK1234567). */
-export const KENYAN_PASSPORT = /^[A-Z]{1,2}\d{7}$/;
+/** Ordinary Kenyan passport (A1234567) and ePassport (AK1234567), up to 9 digits. */
+export const KENYAN_PASSPORT = /^[A-Z]{1,2}\d{1,9}$/;
 export const AGENT_NUMBER = /^[A-Z0-9][A-Z0-9\-/]*$/;
 
 export function isKenyanPassport(value: string): boolean {
@@ -648,7 +648,7 @@ export function validateIndividual(draft: IndividualMajuu, atSubmit: boolean): s
   const passport = draft.passportNo.trim().toUpperCase();
   if (!passport) errors.push('Passport number is required.');
   else if (!draft.recruitmentLocked.includes('passportNo') && !isKenyanPassport(passport)) {
-    errors.push('Enter a Kenyan passport number: one or two capital letters followed by 7 digits, such as A1234567 or AK1234567.');
+    errors.push('Enter a Kenyan passport number: one or two capital letters followed by up to 9 digits, such as A1234567 or AK123456789.');
   }
   const agent = draft.agentNumber.trim().toUpperCase();
   if (agent && !AGENT_NUMBER.test(agent)) errors.push('Agent number must be capital letters and numbers.');

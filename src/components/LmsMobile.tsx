@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
+import { LmsWork } from './LmsWork';
 import { MailBox } from './MailBox';
 import {
   LMS_PAGES,
-  generateLmsReport,
   loadLmsCache,
-  reportMethod,
+  openLmsFromZimbra,
   roleLabel,
   syncLmsMailbox,
   type LmsPageView,
@@ -13,7 +13,7 @@ import {
 } from '../lib/lmsSync';
 import { probeOrigin } from '../lib/portalStatus';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
-import { standardMailboxPassword } from '../lib/zimbraAuth';
+import { isUwezoMailbox, setMailboxPassword, standardMailboxPassword } from '../lib/zimbraAuth';
 import { openExternal } from '../lib/openLink';
 
 type LmsOfficer = {
@@ -30,7 +30,7 @@ type LmsMobileProps = {
   onLogout: () => void;
 };
 
-const emptyView: LmsPageView = { summary: [], tables: [], notes: [] };
+const emptyView: LmsPageView = { summary: [], tables: [], notes: [], fields: [], actions: [] };
 
 export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [revision, setRevision] = useState(0);
@@ -38,7 +38,10 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const pages = (cache?.menu && cache.menu.length ? cache.menu : LMS_PAGES[officer.role]) || LMS_PAGES.staff;
   const [page, setPage] = useState(pages[0]?.id || 'dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<'pages' | 'mail'>('pages');
+  const [section, setSection] = useState<'pages' | 'mail' | 'password'>('pages');
+  const [mailRevision, setMailRevision] = useState(0);
+  const [nextPassword, setNextPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [lmsOnline, setLmsOnline] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -63,13 +66,11 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
 
   async function refreshPages() {
     const staff = loadStaffSession();
-    if (!staff?.password) {
-      setNotice('Log out and sign in again to download fresh LMS pages.');
-      return;
-    }
+    if (!staff) return;
     setBusy(true);
-    const synced = await syncLmsMailbox(staff.email, staff.password);
-    if (synced.authenticated) {
+    let synced = staff.password ? await syncLmsMailbox(staff.email, staff.password) : null;
+    if (!synced?.authenticated && staff.mail?.token) synced = await openLmsFromZimbra(staff.email, staff.mail.token);
+    if (synced?.authenticated) {
       saveStaffSession({
         ...staff,
         role: synced.role,
@@ -77,25 +78,37 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         syncDetail: synced.detail,
       });
     }
-    setNotice(synced.detail);
+    setNotice(synced?.detail || 'Sign in again to download fresh LMS pages.');
     setRevision((value) => value + 1);
     setBusy(false);
   }
 
-  async function generate() {
-    if (!current?.path) return;
-    setBusy(true);
-    let result = await generateLmsReport(officer.email, current.path);
-    if (!result.ok && /expired|Sign in/i.test(result.detail)) {
-      const staff = loadStaffSession();
-      if (staff?.password) {
-        await syncLmsMailbox(staff.email, staff.password);
-        result = await generateLmsReport(officer.email, current.path);
-      }
+  async function changeMailboxPassword() {
+    if (nextPassword !== confirmPassword) {
+      setNotice('The two passwords do not match.');
+      return;
     }
-    setOverride(result.view);
-    setNotice(result.detail);
+    setBusy(true);
+    const result = await setMailboxPassword(officer.email, nextPassword);
     setBusy(false);
+    if (!result.ok) {
+      setNotice(result.message);
+      return;
+    }
+    const staff = loadStaffSession();
+    if (staff) {
+      const samePassword = Boolean(staff.password && staff.mail && staff.password === staff.mail.password);
+      saveStaffSession({
+        ...staff,
+        password: samePassword ? result.password : staff.password,
+        passwordReset: false,
+        mail: { email: result.email, token: result.token, password: result.password },
+      });
+    }
+    setNextPassword('');
+    setConfirmPassword('');
+    setMailRevision((value) => value + 1);
+    setNotice(result.message);
   }
 
   const reset = officer.passwordReset || loadStaffSession()?.passwordReset;
@@ -140,6 +153,12 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             <small>Mailbox</small>
             Mail
           </button>
+          {isUwezoMailbox(officer.email) ? (
+            <button type="button" className="lms-link" onClick={() => { setSection('password'); setMenuOpen(false); }}>
+              <small>Mailbox</small>
+              Change email password
+            </button>
+          ) : null}
           <button type="button" className="lms-link" onClick={onLogout}>
             <small>Account</small>
             Log out
@@ -154,7 +173,21 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           </p>
         ) : null}
         {section === 'mail' ? (
-          <MailBox onPasswordReset={setNotice} />
+          <MailBox key={mailRevision} onPasswordReset={setNotice} />
+        ) : section === 'password' ? (
+          <form className="account-form" onSubmit={(event) => { event.preventDefault(); void changeMailboxPassword(); }}>
+            <h1>Mailbox password</h1>
+            <p className="lms-lede">The new password is saved on mail.govmail.ke for {officer.email}.</p>
+            <label>
+              New password
+              <input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} autoComplete="new-password" />
+            </label>
+            <label>
+              Confirm password
+              <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+            </label>
+            <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</button>
+          </form>
         ) : (
           <>
             <p className="lms-note">{notice || (lmsOnline === null ? 'Checking lms.uwezo.go.ke…' : officer.syncDetail)}</p>
@@ -195,12 +228,20 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
               <p>This page has no figures or rows yet.</p>
             ) : null}
             {cache?.fetchedAt ? <p className="home-chat-note">Saved on this phone {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
+            {current?.path ? (
+              <LmsWork
+                key={current.path}
+                email={officer.email}
+                path={current.path}
+                fields={view.fields || []}
+                actions={view.actions || []}
+                busy={busy}
+                setBusy={setBusy}
+                setNotice={setNotice}
+                onView={setOverride}
+              />
+            ) : null}
             <div className="doc-actions">
-              {current?.path && reportMethod(current.path) ? (
-                <button type="button" className="btn-primary" disabled={busy} onClick={() => void generate()}>
-                  {busy ? 'Working…' : 'Generate report'}
-                </button>
-              ) : null}
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refreshPages()}>
                 Refresh pages
               </button>

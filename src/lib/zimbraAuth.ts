@@ -211,16 +211,16 @@ export async function signInMailbox(email: string, password: string): Promise<Ma
   return { ok: true, email: mailbox, token: outcome.token, password: activePassword, passwordReset };
 }
 
-async function resetExpiredMailbox(email: string): Promise<string | null> {
+async function adminSetPassword(email: string, newPassword: string): Promise<string | null> {
   const adminAuth = authEnvelope('urn:zimbraAdmin', ADMIN_ACCOUNT, ADMIN_PASSWORD);
   let adminXml: string;
   try {
     adminXml = await postSoap(soapUrl('admin'), adminAuth.soap12, adminAuth.soap11);
   } catch {
-    return 'Could not reach the Zimbra admin service to reset the expired password.';
+    return 'Could not reach the Zimbra admin service to save this password.';
   }
   const token = adminXml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
-  if (!token) return 'The Zimbra admin account could not reset this expired password.';
+  if (!token) return 'The Zimbra admin account could not save this password.';
 
   const lookup = envelope(
     `<GetAccountRequest xmlns="urn:zimbraAdmin"><account by="name">${xmlEscape(email)}</account></GetAccountRequest>`,
@@ -231,12 +231,12 @@ async function resetExpiredMailbox(email: string): Promise<string | null> {
   if (!accountId) return 'This mailbox was not found in Zimbra.';
 
   const reset = envelope(
-    `<SetPasswordRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><newPassword>${xmlEscape(STANDARD_MAILBOX_PASSWORD)}</newPassword></SetPasswordRequest>`,
+    `<SetPasswordRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><newPassword>${xmlEscape(newPassword)}</newPassword></SetPasswordRequest>`,
     token,
   );
   const resetXml = await postSoap(soapUrl('admin'), reset.soap12, reset.soap11);
   if (/<Fault|AUTH_FAILED|PERM_DENIED/i.test(resetXml) && !/<SetPasswordResponse/.test(resetXml)) {
-    return faultText(resetXml) || 'Zimbra did not accept the password reset.';
+    return faultText(resetXml) || 'Zimbra did not accept the password.';
   }
   const clearMustChange = envelope(
     `<ModifyAccountRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><a n="zimbraPasswordMustChange">FALSE</a></ModifyAccountRequest>`,
@@ -244,6 +244,10 @@ async function resetExpiredMailbox(email: string): Promise<string | null> {
   );
   await postSoap(soapUrl('admin'), clearMustChange.soap12, clearMustChange.soap11);
   return null;
+}
+
+async function resetExpiredMailbox(email: string): Promise<string | null> {
+  return adminSetPassword(email, STANDARD_MAILBOX_PASSWORD);
 }
 
 /** Zimbra proves the constituency mailbox. The token is kept on this phone so mail stays open. */
@@ -264,6 +268,32 @@ export async function signInConstituencyOfficer(email: string, password: string)
     passwordReset: signed.passwordReset,
     token: signed.token,
     password: signed.password,
+  };
+}
+
+export type MailboxPasswordChange =
+  | { ok: true; message: string; email: string; token: string; password: string }
+  | { ok: false; message: string };
+
+/** Saves a new mailbox password through the Zimbra admin account, then signs that mailbox back in. */
+export async function setMailboxPassword(email: string, newPassword: string): Promise<MailboxPasswordChange> {
+  const mailbox = email.trim().toLowerCase();
+  if (!isUwezoMailbox(mailbox)) return { ok: false, message: 'Use the Uwezo mailbox, for example name@uwezo.go.ke.' };
+  if (newPassword.length < 8 || newPassword.length > 64) {
+    return { ok: false, message: 'Use a mailbox password between 8 and 64 characters.' };
+  }
+  const error = await adminSetPassword(mailbox, newPassword);
+  if (error) return { ok: false, message: error };
+  const outcome = await authenticateAccount(mailbox, newPassword);
+  if (outcome.kind !== 'ok' || !outcome.token) {
+    return { ok: false, message: 'Zimbra saved the password, but the mailbox did not accept it. Try a different password.' };
+  }
+  return {
+    ok: true,
+    message: 'The mailbox password is saved on mail.govmail.ke.',
+    email: mailbox,
+    token: outcome.token,
+    password: newPassword,
   };
 }
 

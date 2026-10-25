@@ -20,9 +20,9 @@ import { stopOtpListener } from '../lib/native';
 import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/pendingLogin';
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
-import { lmsHostOnline, syncLmsMailbox, type LmsRole } from '../lib/lmsSync';
+import { fetchStaffRole, lmsHostOnline, openLmsFromZimbra, rememberMappedMenu, roleLabel, syncLmsMailbox, type LmsRole } from '../lib/lmsSync';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
-import { isConstituencyMailbox, signInConstituencyOfficer } from '../lib/zimbraAuth';
+import { isUwezoMailbox, signInMailbox } from '../lib/zimbraAuth';
 
 type Mode = 'menu' | 'login' | 'reset' | 'signed_in';
 
@@ -156,43 +156,50 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     setSavedForLater(false);
     try {
       const lmsOnline = await lmsHostOnline();
-      const lms = lmsOnline ? await syncLmsMailbox(emailNorm, password) : null;
+      const mailboxPromise = isUwezoMailbox(emailNorm) ? signInMailbox(emailNorm, password) : Promise.resolve(null);
+      const lmsPromise = lmsOnline ? syncLmsMailbox(emailNorm, password) : Promise.resolve(null);
+      const [mailbox, lms] = await Promise.all([mailboxPromise, lmsPromise]);
+      const mailLink = mailbox?.ok
+        ? { email: mailbox.email, token: mailbox.token, password: mailbox.password }
+        : null;
       if (lms?.authenticated) {
         rememberOfficer({
           email: emailNorm,
           constituency: lms.constituency || emailNorm,
-          passwordReset: false,
+          passwordReset: Boolean(mailbox?.ok && mailbox.passwordReset),
           role: lms.role,
           syncDetail: lms.detail,
           lmsPassword: password,
-          mail: null,
+          mail: mailLink,
         });
         return;
       }
-      if (isConstituencyMailbox(emailNorm)) {
-        const officer = await signInConstituencyOfficer(emailNorm, password);
-        if (!officer.ok) {
-          setError(lms?.detail && lmsOnline ? `${officer.message} ${lms.detail}` : officer.message);
-          return;
-        }
-        const mailboxPassword = officer.password;
-        const synced = lmsOnline ? await syncLmsMailbox(officer.email, mailboxPassword) : null;
+      if (mailbox?.ok) {
+        const opened = lmsOnline ? await openLmsFromZimbra(mailbox.email, mailbox.token) : null;
+        const mapped = !opened?.authenticated && lmsOnline ? await fetchStaffRole('https://lms.uwezo.go.ke', mailbox.email) : null;
+        if (mapped?.found) rememberMappedMenu(mailbox.email, mapped);
+        const role = opened?.authenticated ? opened.role : (mapped?.found ? mapped.role : 'staff');
         rememberOfficer({
-          email: officer.email,
-          constituency: synced?.constituency || officer.constituency,
-          passwordReset: officer.passwordReset,
-          role: synced?.authenticated ? synced.role : 'constituency',
-          syncDetail: synced?.authenticated
-            ? synced.detail
-            : `Signed in with the constituency mailbox. ${synced?.detail || 'lms.uwezo.go.ke did not accept this password, so the constituency menu is shown without a new download.'}`,
-          lmsPassword: synced?.authenticated ? mailboxPassword : '',
-          mail: { email: officer.email, token: officer.token, password: officer.password },
+          email: mailbox.email,
+          constituency: opened?.constituency || mapped?.constituency || mailbox.email,
+          passwordReset: mailbox.passwordReset,
+          role,
+          syncDetail: opened?.authenticated
+            ? opened.detail
+            : ['Signed in with the mailbox.', opened?.detail, mapped?.found ? `This mailbox is mapped as ${roleLabel(mapped.role)}.` : '', lms?.detail].filter(Boolean).join(' '),
+          lmsPassword: '',
+          mail: mailLink,
         });
+        return;
+      }
+      if (isUwezoMailbox(emailNorm)) {
+        const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
+        setError([mailboxMessage, lms?.detail].filter(Boolean).join(' ') || 'Sign-in was not accepted.');
         return;
       }
     } catch {
-      if (isConstituencyMailbox(emailNorm)) {
-        setError('Could not reach the constituency mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
+      if (isUwezoMailbox(emailNorm)) {
+        setError('Could not reach the mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
         return;
       }
     } finally {

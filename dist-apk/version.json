@@ -1,6 +1,6 @@
 {
-  "versionCode": 34,
-  "versionName": "1.1.30",
+  "versionCode": 35,
+  "versionName": "1.1.31",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "A delivered guarantor OTP is accepted. LMS screens show figures and tables for headquarters, accounts, and constituency officers, stay signed in until log out, and include mailbox."
+  "notes": "Zimbra sign-in opens the mapped LMS role and mailbox. Mail can be deleted in batches, and compose includes formatting, attachments, and a signature. Reports generate, page changes can be compared before submit, and passport numbers may contain up to 9 digits."
 }
