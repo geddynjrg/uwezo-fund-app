@@ -1,5 +1,5 @@
 {
-  "versionCode": 46,
-  "versionName": "1.1.42",
-  "notes": "LMS website UI is embedded in the app under the Uwezo header after sign-in (live online, cached offline). Refresh still syncs the LMS database."
+  "versionCode": 47,
+  "versionName": "1.1.43",
+  "apk": "UwezoFund.apk"
 }
