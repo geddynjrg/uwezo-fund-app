@@ -1,5 +1,5 @@
 {
-  "versionCode": 42,
-  "versionName": "1.1.38",
-  "notes": "Offline LMS database: constituency tables sync to the phone and upload receipts when back online. Live LMS still opens for full website actions."
+  "versionCode": 43,
+  "versionName": "1.1.39",
+  "notes": "Live LMS UI when online; encrypted offline DB; Refresh probes the server; Compare with the LMS only when online and offline changes are waiting to send."
 }
