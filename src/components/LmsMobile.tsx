@@ -7,10 +7,13 @@ import {
   cacheHasFigures,
   loadLmsCache,
   openLmsFromZimbra,
+  pageKit,
   roleLabel,
+  runLmsAction,
   syncLmsMailbox,
   type LmsPageView,
   type LmsRole,
+  type LmsRowAction,
 } from '../lib/lmsSync';
 import { probeOrigin } from '../lib/portalStatus';
 import { officerCopyStatus } from '../lib/officerVault';
@@ -95,6 +98,24 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     setNotice(synced?.detail || 'Sign in again to download fresh LMS pages.');
     setRevision((value) => value + 1);
     setBusy(false);
+  }
+
+  async function runRowAction(action: LmsRowAction) {
+    if (!current?.path) return;
+    setBusy(true);
+    setNotice('');
+    const result = await runLmsAction(officer.email, current.path, {
+      __action: action.method,
+      __params: JSON.stringify(action.params),
+      __id: String(action.params[0] ?? ''),
+      editingPhaseId: String(action.params[0] ?? ''),
+    });
+    setBusy(false);
+    setNotice(result.detail);
+    if (result.ok) {
+      setOverride(result.view);
+      setRevision((value) => value + 1);
+    }
   }
 
   async function changeMailboxPassword() {
@@ -226,23 +247,49 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             {view.tables.map((table, index) => (
               <div className="lms-table" key={`${table.title}-${index}`}>
                 {table.title ? <h2>{table.title}</h2> : null}
-                <table>
-                  {table.headers.length ? (
-                    <thead>
-                      <tr>{table.headers.map((header) => <th key={header}>{header}</th>)}</tr>
-                    </thead>
-                  ) : null}
-                  <tbody>
-                    {table.rows.map((row, rowIndex) => (
-                      <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>
-                    ))}
-                  </tbody>
-                </table>
+                {table.rows.length ? (
+                  <table>
+                    {table.headers.length ? (
+                      <thead>
+                        <tr>
+                          {table.headers.map((header) => <th key={header}>{header}</th>)}
+                          {table.rowActions?.some((item) => item.length) ? <th>Actions</th> : null}
+                        </tr>
+                      </thead>
+                    ) : null}
+                    <tbody>
+                      {table.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex}>
+                          {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+                          {table.rowActions?.some((item) => item.length) ? (
+                            <td>
+                              <div className="lms-row-actions">
+                                {(table.rowActions[rowIndex] || []).map((action) => (
+                                  <button
+                                    key={`${action.method}-${action.params.join('-')}`}
+                                    type="button"
+                                    className="btn-ghost"
+                                    disabled={busy}
+                                    onClick={() => void runRowAction(action)}
+                                  >
+                                    {action.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                          ) : null}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'No rows on this list yet.'}</p>
+                )}
               </div>
             ))}
             {view.notes.map((note) => <p key={note}>{note}</p>)}
             {!view.summary.length && !view.tables.length && !view.notes.length ? (
-              <p>This page has no figures or rows yet.</p>
+              <p className="home-chat-note">{pageKit(current?.path || '')?.empty || 'This page has no figures or rows yet. Tap Refresh pages while online.'}</p>
             ) : null}
             {cache?.fetchedAt ? <p className="home-chat-note">Saved on this phone {new Date(cache.fetchedAt).toLocaleString()}.</p> : null}
             {current?.path ? (

@@ -3,6 +3,7 @@ import {
   DEFAULT_REPORT_COLUMNS,
   REPORT_FIELDS,
   loadLmsDraft,
+  pageKit,
   reportMethod,
   reviewLmsDraft,
   runLmsAction,
@@ -24,10 +25,14 @@ type LmsWorkProps = {
 };
 
 export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice, onView }: LmsWorkProps) {
-  const report = reportMethod(path) === 'generateReport';
+  const kit = pageKit(path);
+  const report = Boolean(reportMethod(path));
+  const kitActions = kit?.actions || [];
+  const actionList = kitActions.length ? kitActions.map((item) => item.method) : actions;
+  const formFields = (kit?.fields.length ? kit.fields : fields).filter((field) => field.key !== 'selectedColumns');
   const [values, setValues] = useState<Record<string, string>>({});
   const [review, setReview] = useState<LmsCompareRow[] | null>(null);
-  const [action, setAction] = useState(reportMethod(path) || actions[0] || '');
+  const [action, setAction] = useState(reportMethod(path) || actionList[0] || '');
   const groups = [...new Set(REPORT_FIELDS.map((field) => field.group))];
   const selected = new Set((values.selectedColumns || '').split(',').filter(Boolean));
 
@@ -39,10 +44,10 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
       setValues(saved);
     } else {
       const initial: Record<string, string> = {};
-      for (const field of fields) initial[field.key] = field.value;
+      for (const field of formFields) initial[field.key] = field.value || '';
       setValues(initial);
     }
-    setAction(reportMethod(path) || actions[0] || '');
+    setAction(reportMethod(path) || actionList[0] || '');
     setReview(null);
     // The form opens from the page that was just selected.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -56,8 +61,8 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
     setReview(null);
   }
 
-  function savedValues(): Record<string, string> {
-    return action ? { ...values, __action: action } : values;
+  function savedValues(nextAction = action): Record<string, string> {
+    return nextAction ? { ...values, __action: nextAction } : { ...values };
   }
 
   function keep() {
@@ -75,13 +80,16 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
     setReview(result.ok ? result.rows : null);
   }
 
-  async function submit() {
-    if (!review) {
+  async function submit(nextAction?: string) {
+    const chosen = nextAction || action;
+    const next = savedValues(chosen);
+    saveLmsDraft(email, path, next);
+    if (report && !review) {
       await compare();
       return;
     }
     setBusy(true);
-    const result = await runLmsAction(email, path, savedValues());
+    const result = await runLmsAction(email, path, next);
     setBusy(false);
     setNotice(result.detail);
     if (result.ok) {
@@ -90,16 +98,17 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
     }
   }
 
-  if (!report && !fields.length && !actions.length) {
-    return <p className="home-chat-note">This page is the latest copy from the LMS. Refresh pages to download it again. It has no form to submit from the app.</p>;
+  if (!report && !formFields.length && !actionList.length && !kit) {
+    return <p className="home-chat-note">This page is the latest copy from the LMS. Refresh pages to download it again.</p>;
   }
 
   return (
     <div className="lms-fields">
+      {kit?.intro ? <p className="home-chat-note">{kit.intro}</p> : null}
       {report ? (
         <>
-          <h2>Report columns</h2>
-          <p className="home-chat-note">Choose the columns saved on this phone. Generate compares them with the LMS before it submits.</p>
+          <h2>{path.includes('sector') ? 'Sectoral analysis columns' : 'Report columns'}</h2>
+          <p className="home-chat-note">Choose the columns used on the online LMS. Compare them, then generate the report.</p>
           {groups.map((group) => (
             <fieldset key={group}>
               <legend>{group}</legend>
@@ -113,11 +122,13 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
           ))}
         </>
       ) : (
-        fields.map((field) => (
+        formFields.map((field) => (
           <label key={field.key}>
             {field.label}
             <input
-              value={values[field.key] ?? field.value}
+              type={field.type || 'text'}
+              value={values[field.key] ?? field.value ?? ''}
+              placeholder={field.placeholder || ''}
               onChange={(event) => {
                 setValues({ ...values, [field.key]: event.target.value });
                 setReview(null);
@@ -126,11 +137,13 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
           </label>
         ))
       )}
-      {!report && actions.length > 1 ? (
+      {!report && actionList.length > 1 && kitActions.length <= 1 ? (
         <label>
           Action
           <select value={action} onChange={(event) => setAction(event.target.value)}>
-            {actions.map((name) => <option key={name} value={name}>{name}</option>)}
+            {actionList.map((name) => (
+              <option key={name} value={name}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>
+            ))}
           </select>
         </label>
       ) : null}
@@ -156,12 +169,31 @@ export function LmsWork({ email, path, fields, actions, busy, setBusy, setNotice
         </div>
       ) : null}
       <div className="doc-actions">
-        <button type="button" className="btn-ghost" disabled={busy} onClick={keep}>Save on this phone</button>
-        <button type="button" className="btn-ghost" disabled={busy} onClick={() => void compare()}>Compare with the LMS</button>
+        {formFields.length || report ? (
+          <button type="button" className="btn-ghost" disabled={busy} onClick={keep}>Save on this phone</button>
+        ) : null}
+        {report || formFields.length ? (
+          <button type="button" className="btn-ghost" disabled={busy} onClick={() => void compare()}>Compare with the LMS</button>
+        ) : null}
         {review ? <button type="button" className="btn-ghost" disabled={busy} onClick={() => setReview(null)}>Make changes</button> : null}
-        <button type="button" className="btn-primary" disabled={busy} onClick={() => void submit()}>
-          {busy ? 'Working…' : review ? 'Submit as saved on this phone' : 'Review before submit'}
-        </button>
+        {kitActions.length ? kitActions.map((item, index) => (
+          <button
+            key={item.method}
+            type="button"
+            className={index === 0 ? 'btn-primary' : 'btn-ghost'}
+            disabled={busy}
+            onClick={() => {
+              setAction(item.method);
+              void submit(item.method);
+            }}
+          >
+            {busy && action === item.method ? 'Working…' : item.label}
+          </button>
+        )) : (
+          <button type="button" className="btn-primary" disabled={busy || !action} onClick={() => void submit()}>
+            {busy ? 'Working…' : review ? 'Submit as saved on this phone' : (report ? 'Review before generate' : 'Run action')}
+          </button>
+        )}
       </div>
     </div>
   );

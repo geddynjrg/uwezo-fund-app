@@ -7,11 +7,18 @@ const CACHE_KEY = 'uwezo.lms.cache';
 export type LmsPage = { id: string; group: string; title: string; path: string };
 
 export type LmsSummary = { label: string; value: string; note: string };
-export type LmsTable = { title: string; headers: string[]; rows: string[][] };
-export type LmsField = { key: string; label: string; value: string };
+export type LmsRowAction = { label: string; method: string; params: Array<string | number> };
+export type LmsTable = { title: string; headers: string[]; rows: string[][]; rowActions?: LmsRowAction[][] };
+export type LmsField = { key: string; label: string; value?: string; type?: string; placeholder?: string };
 export type LmsPageView = { summary: LmsSummary[]; tables: LmsTable[]; notes: string[]; fields: LmsField[]; actions: string[] };
 export type LmsMapping = { found: boolean; role: LmsRole; constituency: string; base: string };
 export type LmsCompareRow = { label: string; server: string; phone: string; different: boolean };
+export type LmsPageKit = {
+  intro: string;
+  empty: string;
+  fields: LmsField[];
+  actions: { method: string; label: string }[];
+};
 
 export type LmsCache = {
   email: string;
@@ -127,7 +134,9 @@ export function saveLmsCache(cache: LmsCache) {
 
 export function pageHasFigures(view: LmsPageView | null | undefined): boolean {
   if (!view) return false;
-  return Boolean(view.summary.length || view.tables.length || view.notes.length);
+  if (view.summary.length) return true;
+  if (view.tables.some((table) => table.rows.length > 0)) return true;
+  return view.notes.some((note) => note && !isJunkText(note));
 }
 
 export function cacheHasFigures(cache: LmsCache | null | undefined): boolean {
@@ -168,8 +177,57 @@ function decodeEntities(value: string): string {
     .replace(/&amp;/g, '&');
 }
 
+function stripTags(html: string): string {
+  // Do not cut tags early when attributes contain ">" (Alpine/Livewire does this).
+  return html.replace(/<\/?[a-zA-Z][^>]*?(?:"[^"]*"|'[^']*'|[^>"'])*>/g, ' ');
+}
+
 function textOf(html: string): string {
-  return decodeEntities(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(stripTags(html)).replace(/\s+/g, ' ').trim();
+}
+
+function isJunkText(value: string): boolean {
+  return /isShaking|filteredOptions|x-on:|x-data|x-effect|wire:|Processing\.\.\.|\$el|\$watch|getSelectedColor|No results found for|custom-action-modal|confirm-delete|@keydown|@form-validation|function\s*\(|=>\s*\{/i.test(value);
+}
+
+function removeMatchingDivs(html: string, test: (openTag: string) => boolean): string {
+  let out = html;
+  let guard = 0;
+  while (guard < 40) {
+    guard += 1;
+    const open = /<div\b[^>]*>/i.exec(out);
+    if (!open) break;
+    let changed = false;
+    const re = /<div\b[^>]*>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(out))) {
+      if (!test(match[0])) continue;
+      const start = match.index;
+      let depth = 1;
+      let cursor = start + match[0].length;
+      while (cursor < out.length && depth > 0) {
+        const nextOpen = out.slice(cursor).search(/<div\b/i);
+        const nextClose = out.slice(cursor).search(/<\/div>/i);
+        if (nextClose < 0) {
+          depth = 0;
+          cursor = out.length;
+          break;
+        }
+        if (nextOpen >= 0 && nextOpen < nextClose) {
+          depth += 1;
+          cursor += nextOpen + 4;
+        } else {
+          depth -= 1;
+          cursor += nextClose + 6;
+        }
+      }
+      out = `${out.slice(0, start)} ${out.slice(cursor)}`;
+      changed = true;
+      break;
+    }
+    if (!changed) break;
+  }
+  return out;
 }
 
 function humanize(key: string): string {
@@ -205,8 +263,8 @@ export function pageFields(html: string): LmsField[] {
     }
     if (type === 'hidden' || type === 'password' || type === 'file' || type === 'submit' || type === 'button') continue;
     const key = fieldKey(attrs);
-    if (!key || key === '_token') continue;
-    fields.push({ key, label: humanize(key), value: decodeEntities(/value="([^"]*)"/.exec(attrs)?.[1] || '') });
+    if (!key || key === '_token' || /search|Filter|perPage|workspace|analysisDimension/i.test(key)) continue;
+    fields.push({ key, label: humanize(key), value: decodeEntities(/value="([^"]*)"/.exec(attrs)?.[1] || ''), type: type === 'date' || type === 'number' ? type : 'text' });
   }
   for (const match of body.matchAll(/<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi)) {
     const key = fieldKey(match[1]);
@@ -215,14 +273,14 @@ export function pageFields(html: string): LmsField[] {
   }
   for (const match of body.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
     const key = fieldKey(match[1]);
-    if (!key) continue;
+    if (!key || /Filter|perPage/i.test(key)) continue;
     const selected = /<option\b[^>]*selected[^>]*>([\s\S]*?)<\/option>/i.exec(match[2]);
     fields.push({ key, label: humanize(key), value: textOf(selected?.[1] || '') });
   }
   for (const [key, values] of choices) fields.push({ key, label: humanize(key), value: values.join(', ') });
   const seen = new Set<string>();
   return fields.filter((field) => {
-    if (seen.has(field.key)) return false;
+    if (seen.has(field.key) || isJunkText(field.label) || isJunkText(field.value || '')) return false;
     seen.add(field.key);
     return true;
   }).slice(0, 40);
@@ -233,22 +291,114 @@ export function pageActions(html: string): string[] {
   const found: string[] = [];
   for (const match of body.matchAll(/wire:(?:click|submit)(?:\.[\w.]+)?="([A-Za-z_][\w]*)/g)) {
     const name = match[1];
-    if (found.includes(name) || /^(toggle|select|clear|remove|reset|open|close|show|hide|set|updated)/i.test(name)) continue;
-    if (/save|submit|update|store|create|approve|reject|restore|generate|preview|lock|unlock|pay|confirm|delete|upload/i.test(name)) found.push(name);
+    if (found.includes(name) || /^(toggle|select|clear|remove|reset|open|close|show|hide|set|updated|updating)/i.test(name)) continue;
+    if (/save|submit|update|store|create|approve|reject|restore|generate|preview|lock|unlock|pay|confirm|delete|upload|refresh|export|assign/i.test(name)) found.push(name);
   }
-  return found.slice(0, 8);
+  return found.slice(0, 12);
 }
 
 function contentHtml(html: string): string {
   const marked = /<div class="content-wrapper">([\s\S]*?)<\/div>\s*<!-- \/\.content-wrapper -->/i.exec(html);
   const start = html.search(/<div class="content-wrapper">/i);
   const end = html.search(/<footer class="main-footer/i);
-  const body = marked?.[1] || (start >= 0 && end > start ? html.slice(start, end) : html);
-  return body
+  let body = marked?.[1] || (start >= 0 && end > start ? html.slice(start, end) : html);
+  body = body
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
-    .replace(/<ol class="breadcrumb[\s\S]*?<\/ol>/gi, ' ');
+    .replace(/<template[\s\S]*?<\/template>/gi, ' ')
+    .replace(/<ol class="breadcrumb[\s\S]*?<\/ol>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+  body = removeMatchingDivs(body, (tag) => /(?:\bmodal\b|x-data=|wire:ignore\.self|custom-action-modal|dropdown-search|officer-guide)/i.test(tag));
+  return body;
+}
+
+export function pageKit(path: string): LmsPageKit | null {
+  const clean = path.split('?')[0];
+  if (/\/applications\/phases$/.test(clean)) {
+    return {
+      intro: 'Create a review phase the same way as on the online LMS. Use a name like Phase 3, set the scheduled review date, then create it.',
+      empty: 'No phases are listed yet. Create a phase to start a review cycle.',
+      fields: [
+        { key: 'phaseName', label: 'Phase name', placeholder: 'Phase 3' },
+        { key: 'reviewDate', label: 'Scheduled review date', type: 'date' },
+        { key: 'reviewVenue', label: 'Review venue (optional)', placeholder: 'Optional venue' },
+      ],
+      actions: [{ method: 'createPhase', label: 'Create phase' }],
+    };
+  }
+  if (/\/loans\/phases$/.test(clean)) {
+    return {
+      intro: 'Open a phase to edit its details. Enter the phase id from the list, load it, update the fields, then save.',
+      empty: 'No loan phases are listed for this constituency yet.',
+      fields: [
+        { key: 'editingPhaseId', label: 'Phase id', type: 'number', placeholder: 'From the Action / View row' },
+        { key: 'editPhaseName', label: 'Phase name', placeholder: 'Phase 3' },
+        { key: 'editReviewDate', label: 'Review date', type: 'date' },
+        { key: 'editReviewVenue', label: 'Review venue' },
+        { key: 'editAmountDisbursed', label: 'Amount disbursed', type: 'number' },
+        { key: 'editAmountRepaid', label: 'Amount repaid', type: 'number' },
+      ],
+      actions: [
+        { method: 'openEditPhaseModal', label: 'Load phase for editing' },
+        { method: 'savePhaseDetails', label: 'Save phase details' },
+      ],
+    };
+  }
+  if (/\/applications\/loans$/.test(clean)) {
+    return {
+      intro: 'Applied loans are group loans in pending, approved, deferred, or cancelled status for this constituency.',
+      empty: 'No applied loans for this constituency yet. Applications still under HQ review appear under Applications, not Applied Loans.',
+      fields: [],
+      actions: [{ method: 'refreshData', label: 'Refresh applied loans' }],
+    };
+  }
+  if (/\/dashboard$/.test(clean) || /national=1/.test(path)) {
+    return {
+      intro: 'Constituency dashboard figures from the LMS. Save the bank balance when an open phase request needs it.',
+      empty: 'Dashboard figures will appear after Refresh pages while online.',
+      fields: [{ key: 'constituencyBankBalance', label: 'Available bank balance (KES)', type: 'number', placeholder: 'Optional' }],
+      actions: [
+        { method: 'saveConstituencyBankBalance', label: 'Save bank balance' },
+        { method: 'refreshData', label: 'Refresh dashboard' },
+      ],
+    };
+  }
+  if (/\/reports\/data-upload$/.test(clean)) {
+    return {
+      intro: 'Upload historical or correction data on the LMS. The phone lists the page tools; file picks stay on the online LMS when the browser file control is required.',
+      empty: 'Open Upload Data on the LMS if a file picker is required for this step.',
+      fields: [],
+      actions: [{ method: 'refreshData', label: 'Refresh upload page' }],
+    };
+  }
+  if (/dynamic-report|\/reports$|\/hq\/reports$/.test(clean) || /view=sector/.test(path)) {
+    return {
+      intro: path.includes('sector')
+        ? 'Sectoral analysis uses the same LMS report engine. Choose columns, compare, then generate.'
+        : 'Generate the same LMS report columns on this phone, then submit them to the LMS.',
+      empty: 'Choose report columns, then generate the report.',
+      fields: [],
+      actions: [{ method: reportMethod(path) || 'generateReport', label: path.includes('sector') ? 'Generate sectoral analysis' : 'Generate report' }],
+    };
+  }
+  if (/\/users\/add$/.test(clean)) {
+    return {
+      intro: 'Create a county user with the same fields used on the online LMS.',
+      empty: 'Fill the user details, compare, then submit.',
+      fields: [],
+      actions: [{ method: 'createUser', label: 'Create user' }, { method: 'save', label: 'Save user' }],
+    };
+  }
+  if (/\/groups(\/members|\/multi-group-members)?$/.test(clean) || /\/loans$/.test(clean) || /\/loans\/receipts$/.test(clean) || /\/applications$/.test(clean)) {
+    return {
+      intro: 'Rows and actions below mirror the online LMS list. Use a row action or refresh to sync the latest copy.',
+      empty: 'No rows on this page yet. Refresh while online, or open the page on the LMS if the list is still empty there.',
+      fields: [],
+      actions: [{ method: 'refreshData', label: 'Refresh list' }],
+    };
+  }
+  return null;
 }
 
 function formatCount(raw: string, prefix = '', compact = false): string {
@@ -276,19 +426,58 @@ function isLoginHtml(url: string, html: string): boolean {
   return /name="password"/.test(html) && /name="email"/.test(html) && !/content-wrapper/.test(html);
 }
 
+function rowActionsIn(rowHtml: string): LmsRowAction[] {
+  const actions: LmsRowAction[] = [];
+  for (const match of rowHtml.matchAll(/wire:click(?:\.[\w.]+)?="([A-Za-z_][\w]*)\(([^)]*)\)"/g)) {
+    const method = match[1];
+    if (/^(toggle|select|clear|remove|reset|open|close|show|hide|set|updated)/i.test(method) && !/Modal|Phase|Receipt|Group|Application|Approve|Delete|Edit|View/i.test(method)) {
+      continue;
+    }
+    if (!/edit|view|delete|approve|reject|cancel|open|save|confirm|assign|download|statement|phase|receipt|group|modal/i.test(method)) continue;
+    const params = match[2]
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        if (/^['"]/.test(item)) return item.replace(/^['"]|['"]$/g, '');
+        const amount = Number(item);
+        return Number.isFinite(amount) ? amount : item;
+      });
+    const label = method
+      .replace(/Modal$/i, '')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/^open\s+/i, '')
+      .replace(/\bphase\b/i, 'phase');
+    if (!actions.some((item) => item.method === method && JSON.stringify(item.params) === JSON.stringify(params))) {
+      actions.push({ label: label.charAt(0).toUpperCase() + label.slice(1), method, params });
+    }
+  }
+  return actions.slice(0, 4);
+}
+
 export function pageView(html: string): LmsPageView {
   const body = contentHtml(html);
   const summary: LmsSummary[] = [];
+  for (const match of body.matchAll(/hq-kpi-card[\s\S]{0,900}?<\/div>\s*<\/div>\s*<\/div>/gi)) {
+    const block = match[0];
+    const label = textOf(/text-uppercase[^>]*>([\s\S]*?)<\//i.exec(block)?.[1] || /small[^>]*>([\s\S]*?)<\//i.exec(block)?.[1] || '');
+    const value = textOf(/<h4[^>]*>([\s\S]*?)<\/h4>/i.exec(block)?.[1] || '');
+    const note = textOf(/<small class="text-muted"[^>]*>([\s\S]*?)<\/small>/i.exec(block)?.[1] || '');
+    if (label && value && !isJunkText(label) && !isJunkText(value)) summary.push({ label, value, note });
+  }
   for (const match of body.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>([\s\S]{0,400}?)<p[^>]*>([\s\S]*?)<\/p>/gi)) {
     const value = textOf(match[1]);
     const label = textOf(match[3]);
-    if ((/^\d/.test(value) || /^(KES|Ksh)/i.test(value)) && label) summary.push({ label, value, note: '' });
+    if ((/^\d/.test(value) || /^(KES|Ksh)/i.test(value)) && label && !isJunkText(label)) summary.push({ label, value, note: '' });
   }
-  for (const match of body.matchAll(/<h4[^>]*>([\s\S]*?)<\/h4>([\s\S]{0,700}?)<p[^>]*>([\s\S]*?)<\/p>/gi)) {
+  for (const match of body.matchAll(/<h4[^>]*>([\s\S]*?)<\/h4>/gi)) {
     const value = textOf(match[1]);
-    const label = textOf(match[3]);
-    const note = textOf(match[2].match(/<small[^>]*>([\s\S]*?)<\/small>/i)?.[1] || '');
-    if (label || value) summary.push({ label: label || 'Figure', value, note });
+    if (!(/^\d/.test(value) || /^(KES|Ksh)/i.test(value))) continue;
+    const before = body.slice(Math.max(0, (match.index || 0) - 280), match.index || 0);
+    const after = body.slice((match.index || 0), (match.index || 0) + 280);
+    const label = textOf(/text-uppercase[^>]*>([\s\S]*?)<\//i.exec(before)?.[1] || /<span[^>]*>([\s\S]*?)<\/span>/i.exec(before)?.[1] || '');
+    const note = textOf(/<small[^>]*>([\s\S]*?)<\/small>/i.exec(after)?.[1] || '');
+    if (label && !isJunkText(label)) summary.push({ label, value, note });
   }
   for (const match of body.matchAll(/<div class="[^"]*nat-kpi-tile[^"]*"[\s\S]*?<\/div>\s*<\/div>/gi)) {
     const block = match[0];
@@ -302,47 +491,60 @@ export function pageView(html: string): LmsPageView {
     const label = textOf(match[1]);
     const after = body.slice(match.index || 0, (match.index || 0) + 500);
     const value = countUpValue(after, textOf(/class="[^"]*kpi-value[^"]*"[^>]*>([\s\S]*?)<\//i.exec(after)?.[1] || ''));
-    if (label && value) summary.push({ label, value, note: '' });
-  }
-  for (const match of body.matchAll(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>([\s\S]{0,300}?class="info-box-number"[^>]*>([\s\S]*?)<\/span>)?/gi)) {
-    const label = textOf(match[1]);
-    const value = countUpValue(match[0], textOf(match[3] || ''));
-    if (label) summary.push({ label, value, note: value ? '' : 'Assigned' });
+    if (label && value && !isJunkText(label)) summary.push({ label, value, note: '' });
   }
   for (const match of body.matchAll(/class="info-box-number"[^>]*>([\s\S]*?)<\/span>/gi)) {
     const value = countUpValue(match[0], textOf(match[1]));
     const before = body.slice(Math.max(0, (match.index || 0) - 300), match.index || 0);
     const label = textOf(/class="info-box-text"[^>]*>([\s\S]*?)<\/span>/i.exec(before)?.[1] || '');
-    if (label && value) summary.push({ label, value, note: '' });
+    if (label && value && !isJunkText(label)) summary.push({ label, value, note: '' });
   }
   const tables: LmsTable[] = [];
   for (const match of body.matchAll(/<table[\s\S]*?<\/table>/gi)) {
     const block = match[0];
-    const headers = [...block.matchAll(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi)].map((cell) => textOf(cell[1])).filter(Boolean).slice(0, 8);
-    const rows = [...block.matchAll(/<tr[\s\S]*?>([\s\S]*?)<\/tr>/gi)].map((row) => (
-      [...row[1].matchAll(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi)].map((cell) => textOf(cell[1]).slice(0, 120)).slice(0, 8)
-    )).filter((cells) => cells.some(Boolean)).slice(0, 40);
+    const headers = [...block.matchAll(/<th[\s\S]*?>([\s\S]*?)<\/th>/gi)]
+      .map((cell) => textOf(cell[1]))
+      .filter((header) => header && !isJunkText(header) && !/^action$/i.test(header))
+      .slice(0, 8);
+    const collected: { cells: string[]; actions: LmsRowAction[] }[] = [];
+    for (const row of block.matchAll(/<tr[\s\S]*?>([\s\S]*?)<\/tr>/gi)) {
+      const cells = [...row[1].matchAll(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi)]
+        .map((cell) => textOf(cell[1]).slice(0, 120))
+        .filter((cell) => !isJunkText(cell))
+        .slice(0, 8);
+      const actions = rowActionsIn(row[1]);
+      if (!cells.some(Boolean) && !actions.length) continue;
+      collected.push({ cells, actions });
+      if (collected.length >= 40) break;
+    }
+    const rows = collected.map((item) => item.cells);
+    const alignedActions = collected.map((item) => item.actions);
     if (headers.length || rows.length) {
       const caption = textOf(block.match(/<caption[^>]*>([\s\S]*?)<\/caption>/i)?.[1] || '');
       const heading = textOf(
         body.slice(Math.max(0, (match.index || 0) - 400), match.index || 0).match(/<h[1-5][^>]*>([\s\S]*?)<\/h[1-5]>/i)?.[1] || '',
       );
-      tables.push({ title: caption || heading, headers, rows });
+      tables.push({
+        title: caption || heading,
+        headers,
+        rows,
+        rowActions: alignedActions.some((item) => item.length) ? alignedActions : undefined,
+      });
     }
     if (tables.length >= 4) break;
   }
-  const notes = summary.length || tables.length
+  const notes = summary.length || tables.some((table) => table.rows.length)
     ? []
     : [...body.matchAll(/<(?:h1|h3|h5|p)[^>]*>([\s\S]*?)<\/(?:h1|h3|h5|p)>/gi)]
       .map((item) => textOf(item[1]))
-      .filter((item) => item.length > 8 && item.length < 280)
-      .filter((item) => !/brad diesel|john pierce|nora silvester/i.test(item))
+      .filter((item) => item.length > 8 && item.length < 180)
+      .filter((item) => !isJunkText(item) && !/brad diesel|john pierce|nora silvester|welcome back|quick reference/i.test(item))
       .slice(0, 5);
   const seen = new Set<string>();
   return {
     summary: summary.filter((item) => {
       const key = `${item.label}|${item.value}`;
-      if (seen.has(key)) return false;
+      if (seen.has(key) || isJunkText(item.label) || isJunkText(item.value)) return false;
       seen.add(key);
       return true;
     }).slice(0, 12),
@@ -985,11 +1187,24 @@ function compareFields(html: string, values: Record<string, string>): LmsCompare
 }
 
 function componentSnapshot(html: string, hint: string): string {
-  const snaps = [...contentHtml(html).matchAll(/wire:snapshot="([^"]+)"/g)].map((match) => decodeEntities(match[1]));
+  // Prefer the main page component. Guide/side-nav modals must not win.
+  const snaps = [...html.matchAll(/wire:snapshot="([^"]+)"/g)].map((match) => decodeEntities(match[1]));
   const score = (snapshot: string) => {
-    let value = snapshot.length / 10000;
-    if (hint && snapshot.includes(hint)) value += 50;
-    if (snapshot.includes('selectedColumns') || snapshot.includes('previewRows') || snapshot.includes('hasPreview')) value += 20;
+    let name = '';
+    try {
+      name = String((JSON.parse(snapshot) as { memo?: { name?: string } }).memo?.name || '');
+    } catch {
+      name = '';
+    }
+    if (/modal|side-nav|guide|badge|historical-correction/i.test(name)) return -200;
+    let value = Math.min(snapshot.length / 8000, 25);
+    if (hint && snapshot.includes(`"${hint}"`)) value += 90;
+    else if (hint && snapshot.includes(hint)) value += 55;
+    if (/phase-manager|application-dashboard|group-loans|loan-receipts|groups-info|group-members|loan-phase|loan-applicants|constituency-dashboard|dynamic|data-upload|create-user|audit/i.test(name)) {
+      value += 70;
+    }
+    if (snapshot.includes('selectedColumns') || snapshot.includes('previewRows') || snapshot.includes('hasPreview')) value += 25;
+    if (snapshot.includes('phaseName') || snapshot.includes('editPhaseName') || snapshot.includes('constituencyBankBalance')) value += 15;
     return value;
   };
   return snaps.sort((left, right) => score(right) - score(left))[0] || '';
@@ -1018,13 +1233,41 @@ function livewireToast(text: string): string {
 
 function livewireUpdates(path: string, values: Record<string, string>, html: string): Record<string, unknown> {
   if (reportMethod(path) === 'generateReport') return { selectedColumns: columnList(values) };
-  const allowed = new Set(pageFields(html).map((field) => field.key));
+  const allowed = new Set([
+    ...pageFields(html).map((field) => field.key),
+    ...(pageKit(path)?.fields.map((field) => field.key) || []),
+  ]);
   const updates: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(values)) {
     if (!key || key.startsWith('__') || !allowed.has(key)) continue;
+    if (key === 'editingPhaseId' || /Id$/.test(key) || key.toLowerCase().includes('amount') || key === 'constituencyBankBalance') {
+      const amount = Number(value);
+      updates[key] = value === '' ? null : (Number.isFinite(amount) && value.trim() !== '' ? amount : value);
+      continue;
+    }
     updates[key] = value;
   }
   return updates;
+}
+
+function actionParams(values: Record<string, string>, method: string): Array<string | number> {
+  if (values.__params) {
+    try {
+      const parsed = JSON.parse(values.__params) as Array<string | number>;
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Fall through to method-specific params.
+    }
+  }
+  if (method === 'openEditPhaseModal' && values.editingPhaseId) {
+    const id = Number(values.editingPhaseId);
+    return [Number.isFinite(id) ? id : values.editingPhaseId];
+  }
+  if ((method === 'editReceipt' || method === 'cancelReceipt' || method === 'viewGroupLoan' || method === 'downloadStatement') && values.__id) {
+    const id = Number(values.__id);
+    return [Number.isFinite(id) ? id : values.__id];
+  }
+  return [];
 }
 
 export async function runLmsAction(
@@ -1039,17 +1282,21 @@ export async function runLmsAction(
   const loaded = await readText(pageUrl, cache.cookie);
   const expired = /\/login\/?(?:\?|$)/.test(loaded.url) || (/name="_token"/.test(loaded.text) && !/content-wrapper/.test(loaded.text));
   if (expired) return { ok: false, detail: 'The LMS sign-in expired. Refresh the pages and try again.', view: current };
-  const known = new Set([reportMethod(path), ...pageActions(loaded.text)].filter(Boolean));
+  const kitMethods = (pageKit(path)?.actions || []).map((item) => item.method);
+  const known = new Set([reportMethod(path), ...pageActions(loaded.text), ...kitMethods].filter(Boolean));
   const requested = values.__action || '';
-  const method = requested && known.has(requested) ? requested : (reportMethod(path) || pageActions(loaded.text)[0] || '');
+  const method = requested && (known.has(requested) || kitMethods.includes(requested))
+    ? requested
+    : (reportMethod(path) || kitMethods[0] || pageActions(loaded.text)[0] || '');
   if (!method) return { ok: false, detail: 'This page has no submit action in the app. Refresh it, or open it on the LMS for a file upload.', view: pageView(loaded.text) };
   const snapshot = componentSnapshot(loaded.text, method);
   const token = /csrf-token"\s+content="([^"]+)"/.exec(loaded.text)?.[1] || /name="_token"\s+value="([^"]+)"/.exec(loaded.text)?.[1] || '';
   if (!snapshot || !token) return { ok: false, detail: 'This page did not include a save action.', view: pageView(loaded.text) };
   const cookie = cookieHeader(`${cache.cookie}; ${loaded.setCookie}`) || cache.cookie;
+  const params = actionParams(values, method);
   const posted = await postJson(`${cache.host}/livewire/update`, cookie, pageUrl, {
     _token: token,
-    components: [{ snapshot, updates: livewireUpdates(path, values, loaded.text), calls: [{ path: '', method, params: [] }] }],
+    components: [{ snapshot, updates: livewireUpdates(path, values, loaded.text), calls: [{ path: '', method, params }] }],
   });
   let html = '';
   try {
@@ -1059,22 +1306,31 @@ export async function runLmsAction(
     html = '';
   }
   const toast = livewireToast(posted.text);
-  const failed = /must select|unauthorised|unauthorized|unexpected error|invalid selection|not authorised/i.test(toast);
-  if (!html || failed) {
+  const failed = /must select|unauthorised|unauthorized|unexpected error|invalid selection|not authorised|permission denied|could not create|validation error/i.test(toast);
+  if (failed) {
     return {
       ok: false,
-      detail: toast || (posted.status === 419
-        ? 'The LMS sign-in expired. Refresh the pages and try again.'
-        : 'The LMS did not return the updated page.'),
+      detail: toast || 'The LMS rejected that action.',
       view: html ? pageView(html) : pageView(loaded.text),
     };
   }
-  const view = pageView(html);
+  // Some actions only toast / refresh without returning replacement HTML.
+  const view = pageView(html || loaded.text);
+  if (!html && method !== 'refreshData') {
+    const refreshed = await readText(pageUrl, cookie);
+    const next = pageView(refreshed.text);
+    saveLmsCache({ ...cache, cookie: mergeSessionCookie(cookie, refreshed.setCookie ? refreshed.setCookie.split('\n') : []), pages: { ...cache.pages, [path]: next } });
+    return {
+      ok: true,
+      detail: toast || 'Submitted to the LMS.',
+      view: next,
+    };
+  }
   saveLmsCache({ ...cache, cookie, pages: { ...cache.pages, [path]: view } });
   const count = view.tables.reduce((sum, table) => sum + table.rows.length, 0);
   return {
     ok: true,
-    detail: toast || (count ? `Submitted. ${count} rows are on this phone.` : 'Submitted to the LMS.'),
+    detail: toast || (count ? `Updated. ${count} rows are on this phone.` : 'Submitted to the LMS.'),
     view,
   };
 }
