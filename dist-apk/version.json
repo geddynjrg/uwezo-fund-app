@@ -1,6 +1,6 @@
 {
-  "versionCode": 36,
-  "versionName": "1.1.32",
+  "versionCode": 37,
+  "versionName": "1.1.33",
   "apkUrl": "https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk",
-  "notes": "A mailbox password is checked first. If the mailbox rejects it, the same password is checked in the LMS. Officer details are encrypted on the phone and refreshed every 15 days."
+  "notes": "A mailbox is checked first. If it rejects the password, the LMS password is accepted directly, including headquarters accounts. Majuu and Loans applicants keep an encrypted copy of their records on the phone and can sign in again without internet."
 }

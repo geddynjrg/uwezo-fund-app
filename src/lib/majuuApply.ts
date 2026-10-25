@@ -332,6 +332,14 @@ function txDone(tx: IDBTransaction) {
   });
 }
 
+export async function deleteMajuu(id: string): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(STORE, 'readwrite');
+  tx.objectStore(STORE).delete(id);
+  await txDone(tx);
+  db.close();
+}
+
 export async function saveMajuu(record: MajuuRecord): Promise<MajuuRecord> {
   const db = await openDb();
   const tx = db.transaction(STORE, 'readwrite');

@@ -329,23 +329,30 @@ function headersOf(headers: unknown): Record<string, string> {
   return out;
 }
 
+function sessionCookie(setCookie: string): string {
+  const value = cookieHeader(setCookie);
+  return /(?:^|; )[A-Za-z0-9_.-]*_session=/.test(value) ? value : '';
+}
+
 async function readText(url: string, cookie: string): Promise<{ status: number; url: string; setCookie: string; text: string }> {
+  const headers: Record<string, string> = { Accept: 'text/html' };
+  if (cookie) headers.Cookie = cookie;
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.get({
       url,
-      headers: { Accept: 'text/html', Cookie: cookie },
+      headers,
       connectTimeout: 20000,
       readTimeout: 20000,
     });
-    const headers = headersOf(response.headers);
+    const received = headersOf(response.headers);
     return {
       status: response.status,
       url: response.url || url,
-      setCookie: headers['set-cookie'] || '',
+      setCookie: received['set-cookie'] || '',
       text: bodyText(response.data),
     };
   }
-  const response = await fetch(url, { headers: { Accept: 'text/html', Cookie: cookie }, credentials: 'include', signal: AbortSignal.timeout(20000) });
+  const response = await fetch(url, { headers, credentials: 'include', signal: AbortSignal.timeout(20000) });
   return { status: response.status, url: response.url, setCookie: '', text: await response.text() };
 }
 
@@ -369,24 +376,68 @@ async function hostAnswers(url: string): Promise<boolean> {
   }
 }
 
-async function loginToHost(host: string, email: string, password: string): Promise<{ ok: boolean; role: LmsRole; cookie: string; html: string; detail: string }> {
+type HostLogin = {
+  ok: boolean;
+  role: LmsRole;
+  cookie: string;
+  html: string;
+  detail: string;
+  account?: { role?: string; constituency?: string; base?: string };
+};
+
+async function loginToHost(host: string, email: string, password: string): Promise<HostLogin> {
+  const direct = await postForm(
+    `${host}/app/password-session`,
+    '',
+    `${host}/login`,
+    `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
+  );
+  if (direct.status !== 404 && direct.status !== 405) {
+    let data: { ok?: boolean; detail?: string; role?: string; constituency?: string; base?: string } = {};
+    try {
+      data = JSON.parse(direct.text) as typeof data;
+    } catch {
+      data = {};
+    }
+    if (direct.status === 429) {
+      return { ok: false, role: 'staff', cookie: '', html: '', detail: data.detail || 'Too many sign-in attempts. Wait a minute, then try the same password again.' };
+    }
+    if (data.ok) {
+      return {
+        ok: true,
+        role: isRole(data.role) ? data.role : 'staff',
+        cookie: sessionCookie(direct.setCookie),
+        html: '',
+        detail: '',
+        account: data,
+      };
+    }
+    return {
+      ok: false,
+      role: 'staff',
+      cookie: '',
+      html: '',
+      detail: data.detail || 'The LMS database did not accept this email and password.',
+    };
+  }
   const loginPage = await readText(`${host}/login`, '');
   const token = /name="_token"\s+value="([^"]+)"/.exec(loginPage.text)?.[1] || '';
   if (!token) return { ok: false, role: 'staff', cookie: '', html: '', detail: `${host.replace('https://', '')} did not return a sign-in form.` };
   const cookie = cookieHeader(loginPage.setCookie);
   const body = `_token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`;
+  const formHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/html', Referer: `${host}/login` };
+  if (cookie) formHeaders.Cookie = cookie;
   const posted = Capacitor.isNativePlatform()
     ? await CapacitorHttp.post({
         url: `${host}/login`,
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/html', Cookie: cookie, Referer: `${host}/login` },
+        headers: formHeaders,
         data: body,
         connectTimeout: 20000,
         readTimeout: 20000,
-        disableRedirects: true,
       })
     : await fetch(`${host}/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'text/html', Cookie: cookie, Referer: `${host}/login` },
+        headers: formHeaders,
         body,
         credentials: 'include',
         redirect: 'follow',
@@ -397,8 +448,8 @@ async function loginToHost(host: string, email: string, password: string): Promi
   const postedText = Capacitor.isNativePlatform()
     ? bodyText((posted as { data?: unknown }).data)
     : await (posted as Response).text();
-  const location = postedHeaders.location || (Capacitor.isNativePlatform() ? '' : (posted as Response).url);
-  const session = cookieHeader(`${cookie}; ${postedHeaders['set-cookie'] || ''}`);
+  const location = postedHeaders.location || (Capacitor.isNativePlatform() ? String((posted as { url?: string }).url || '') : (posted as Response).url);
+  const session = sessionCookie(postedHeaders['set-cookie'] || '');
   if (postedStatus === 429) {
     return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'Too many sign-in attempts. Wait a minute, then try the same password again.' };
   }
@@ -408,6 +459,9 @@ async function loginToHost(host: string, email: string, password: string): Promi
   if (rejected || returnedToLogin || (loginForm && postedStatus !== 302 && postedStatus !== 303)) {
     return { ok: false, role: 'staff', cookie: '', html: postedText, detail: 'The LMS database did not accept this email and password.' };
   }
+  if (/content-wrapper/.test(postedText) && !loginForm) {
+    return { ok: true, role: roleFromPage(location || `${host}/dashboard`, postedText), cookie: session, html: `${location}\n${postedText}`, detail: '' };
+  }
   const nextUrl = location.startsWith('http')
     ? location
     : `${host}${location.startsWith('/') ? location : '/dashboard'}`;
@@ -416,7 +470,7 @@ async function loginToHost(host: string, email: string, password: string): Promi
     || (/name="password"/.test(landed.text) && /name="email"/.test(landed.text) && !/content-wrapper/.test(landed.text));
   if (landedLogin) return { ok: false, role: 'staff', cookie: '', html: landed.text, detail: 'The LMS database did not accept this email and password.' };
   const html = `${landed.url}\n${landed.text}`;
-  return { ok: true, role: roleFromPage(landed.url || nextUrl, landed.text), cookie: cookieHeader(`${session}; ${landed.setCookie}`), html, detail: '' };
+  return { ok: true, role: roleFromPage(landed.url || nextUrl, landed.text), cookie: sessionCookie(landed.setCookie) || session, html, detail: '' };
 }
 
 function isRole(value: unknown): value is LmsRole {
@@ -522,7 +576,14 @@ export async function syncLmsMailbox(email: string, password: string, options?: 
         lastDetail = signed.detail;
         continue;
       }
-      const mapped = await fetchStaffRole(host, email);
+      const mapped = signed.account?.role
+        ? {
+            found: true,
+            role: isRole(signed.account.role) ? signed.account.role : signed.role,
+            constituency: signed.account.constituency || '',
+            base: signed.account.base && /^\/[a-z0-9-]+\/[a-z0-9-]+$/.test(signed.account.base) ? signed.account.base : '',
+          }
+        : await fetchStaffRole(host, email);
       const landedUrl = signed.html.split('\n')[0] || '';
       const base = mapped.base || constituencyBase(landedUrl);
       const role = mapped.found ? mapped.role : signed.role;
@@ -533,8 +594,15 @@ export async function syncLmsMailbox(email: string, password: string, options?: 
         saveLmsCache({ ...cached, email, role, menu, host, cookie: signed.cookie, detail, fetchedAt: cached.fetchedAt });
         return { authenticated: true, role, detail, constituency: mapped.constituency };
       }
-      const saved = await downloadMenu(host, email, role, base, mapped.constituency, signed.cookie, 'Signed in.');
-      return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
+      try {
+        const saved = await downloadMenu(host, email, role, base, mapped.constituency, signed.cookie, 'Signed in.');
+        return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
+      } catch {
+        const menu = role === 'constituency' ? constituencyMenu(base) : LMS_PAGES[role];
+        const detail = `Signed in to ${host.replace('https://', '')} as ${roleLabel(role)}. The page copy will finish when the connection is steady.`;
+        saveLmsCache({ email, role, fetchedAt: new Date().toISOString(), detail, pages: cached?.pages || {}, menu, host, cookie: signed.cookie });
+        return { authenticated: true, role, detail, constituency: mapped.constituency };
+      }
     }
     return {
       authenticated: false,
@@ -555,21 +623,23 @@ export async function syncLmsMailbox(email: string, password: string, options?: 
 }
 
 async function postForm(url: string, cookie: string, referer: string, body: string): Promise<{ status: number; setCookie: string; text: string }> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Referer: referer };
+  if (cookie) headers.Cookie = cookie;
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.post({
       url,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Cookie: cookie, Referer: referer },
+      headers,
       data: body,
       connectTimeout: 20000,
       readTimeout: 20000,
       disableRedirects: true,
     });
-    const headers = headersOf(response.headers);
-    return { status: response.status, setCookie: headers['set-cookie'] || '', text: bodyText(response.data) };
+    const received = headersOf(response.headers);
+    return { status: response.status, setCookie: received['set-cookie'] || '', text: bodyText(response.data) };
   }
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Cookie: cookie, Referer: referer },
+    headers,
     body,
     credentials: 'include',
     redirect: 'manual',

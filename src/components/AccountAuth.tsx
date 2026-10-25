@@ -21,6 +21,8 @@ import { isUnreachableError, savePendingLogin, clearPendingLogin } from '../lib/
 import { LINKS } from '../config';
 import { probeOrigin, type PortalId } from '../lib/portalStatus';
 import { fetchOfficerProfile, fetchStaffRole, lmsHostOnline, loadLmsCache, openLmsFromZimbra, rememberMappedMenu, roleLabel, saveLmsCache, syncLmsMailbox, type LmsRole, type OfficerProfile } from '../lib/lmsSync';
+import { openApplicantCopy, sealApplicantCopy } from '../lib/applicantVault';
+import { clearPublishedRecords, publishApplicantRecords, pullApplicantRecords, recordsNote } from '../lib/applicantRecords';
 import { officerCopyStatus, openOfficerCopy, sealOfficerCopy } from '../lib/officerVault';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
 import { isUwezoMailbox, signInMailbox } from '../lib/zimbraAuth';
@@ -62,6 +64,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     phoneChannel: string;
   } | null>(null);
   const [savedForLater, setSavedForLater] = useState(false);
+  const [recordNote, setRecordNote] = useState('');
 
   useEffect(() => {
     const existing = getActiveSession();
@@ -197,6 +200,22 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     return true;
   }
 
+  async function restoreApplicant(emailNorm: string, passwordValue: string, phoneValue: string): Promise<boolean> {
+    const copy = await openApplicantCopy(emailNorm, passwordValue);
+    if (!copy) return false;
+    if (phoneValue && copy.phone && !sameKenyanLine(phoneValue, copy.phone)) return false;
+    const numbers = await publishApplicantRecords(copy.records);
+    const next = { ...copy.session, remainSignedIn, phone: phoneValue || copy.session.phone, email: emailNorm };
+    saveSession(next);
+    clearPendingLogin();
+    applySession(next);
+    setRecordNote(recordsNote(numbers));
+    setSavedForLater(false);
+    setMode('signed_in');
+    setMessage('Signed in from the encrypted copy on this phone. Majuu and Loans records are available without internet.');
+    return true;
+  }
+
   async function onLogin(e: FormEvent) {
     e.preventDefault();
     const emailNorm = email.trim().toLowerCase();
@@ -261,45 +280,41 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
         if (refreshDetails || opened?.authenticated) await keepOfficerCopy({ email: mailbox.email, password, role: profile?.role || role, constituency: profile?.constituency || constituency, syncDetail, profile });
         return;
       }
-      if (lmsOnline) {
-        const lms = await syncLmsMailbox(emailNorm, password, { refresh: refreshDetails });
-        if (lms.authenticated) {
-          const cache = loadLmsCache(emailNorm);
-          const profile = cache?.host && cache.cookie ? await fetchOfficerProfile(cache.host, cache.cookie, emailNorm) : null;
-          const syncDetail = refreshDetails
-            ? lms.detail
-            : `${lms.detail} Officer details on this phone are still within 15 days.`;
-          rememberOfficer({
-            email: emailNorm,
-            constituency: profile?.constituency || lms.constituency || emailNorm,
-            passwordReset: false,
-            role: profile?.role || lms.role,
-            syncDetail,
-            lmsPassword: '',
-            mail: mailLink,
-          });
-          await keepOfficerCopy({
-            email: emailNorm,
-            password,
-            role: profile?.role || lms.role,
-            constituency: profile?.constituency || lms.constituency || emailNorm,
-            syncDetail,
-            profile,
-          });
-          return;
-        }
-        if (!isUwezoMailbox(emailNorm)) {
-          setError(lms.detail);
-          return;
-        }
-        const rejected = /did not accept|Too many sign-in/i.test(lms.detail);
-        if (!rejected && await restoreOfficerCopy(emailNorm, password)) return;
-        const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
-        setError([mailboxMessage, lms.detail].filter(Boolean).join(' ') || 'Sign-in was not accepted.');
-        return;
-      }
-      if (isUwezoMailbox(emailNorm) && await restoreOfficerCopy(emailNorm, password)) return;
       if (isUwezoMailbox(emailNorm)) {
+        if (lmsOnline) {
+          const lms = await syncLmsMailbox(emailNorm, password, { refresh: refreshDetails });
+          if (lms.authenticated) {
+            const cache = loadLmsCache(emailNorm);
+            const profile = cache?.host && cache.cookie ? await fetchOfficerProfile(cache.host, cache.cookie, emailNorm) : null;
+            const syncDetail = refreshDetails
+              ? lms.detail
+              : `${lms.detail} Officer details on this phone are still within 15 days.`;
+            rememberOfficer({
+              email: emailNorm,
+              constituency: profile?.constituency || lms.constituency || emailNorm,
+              passwordReset: false,
+              role: profile?.role || lms.role,
+              syncDetail,
+              lmsPassword: '',
+              mail: mailLink,
+            });
+            await keepOfficerCopy({
+              email: emailNorm,
+              password,
+              role: profile?.role || lms.role,
+              constituency: profile?.constituency || lms.constituency || emailNorm,
+              syncDetail,
+              profile,
+            });
+            return;
+          }
+          const rejected = /did not accept|Too many sign-in|deactivated/i.test(lms.detail);
+          if (!rejected && await restoreOfficerCopy(emailNorm, password)) return;
+          const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
+          setError([mailboxMessage, lms.detail].filter(Boolean).join(' ') || 'Sign-in was not accepted.');
+          return;
+        }
+        if (await restoreOfficerCopy(emailNorm, password)) return;
         const mailboxMessage = mailbox && !mailbox.ok ? mailbox.message : '';
         setError(mailboxMessage || 'Could not reach the mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
         return;
@@ -310,6 +325,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
         setError('Could not reach the mailbox or lms.uwezo.go.ke. Check your connection, then try again.');
         return;
       }
+      if (await restoreApplicant(emailNorm, password, phoneNorm)) return;
     } finally {
       setBusy(false);
     }
@@ -346,6 +362,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     try {
       const majuuUp = await probeOrigin(LINKS.majuu.url);
       if (!majuuUp || navigator.onLine === false) {
+        if (await restoreApplicant(emailNorm, password, phoneNorm)) return;
         keepForLater();
         return;
       }
@@ -409,15 +426,26 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
       if (!next.accessToken) throw new Error('Login succeeded but no access token returned.');
       saveSession(next);
       clearPendingLogin();
+      const records = await pullApplicantRecords(next);
+      await sealApplicantCopy(password, {
+        email: emailNorm,
+        phone: phoneNorm,
+        savedAt: records.savedAt,
+        session: next,
+        records,
+      });
+      const numbers = await publishApplicantRecords(records);
+      setRecordNote(recordsNote(numbers));
       applySession(next);
       setMode('signed_in');
       setMessage(
         data.created
-          ? 'Account created and you are signed in.'
-          : 'Signed in. You will stay signed in on this device.',
+          ? 'Account created and you are signed in. An encrypted copy is saved on this phone.'
+          : 'Signed in. An encrypted copy of this account is saved on this phone.',
       );
     } catch (err) {
       if (isUnreachableError(err)) {
+        if (await restoreApplicant(emailNorm, password, phoneNorm)) return;
         keepForLater();
         return;
       }
@@ -451,6 +479,8 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
 
   function signOut() {
     clearSession();
+    void clearPublishedRecords();
+    setRecordNote('');
     void stopOtpListener();
     applySession(null);
     setMode('menu');
@@ -501,6 +531,9 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
               Signed in as <strong>{session.email}</strong>
               {'\n'}
               Phone: {session.phone}
+            </p>
+            {recordNote ? <p className="home-chat-note">{recordNote}</p> : null}
+            <p>
               {'\n'}
               Portals:{' '}
               {(session.portals && session.portals.length
@@ -528,10 +561,11 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
             }}
           >
             <p className="home-chat-note">
-              One email, phone, and password is checked for Wezesha Majuu and Loans. You
-              do not choose a portal. A portal is opened only when that same password is
-              already accepted there. A constituency mailbox such as turkanawest@uwezo.go.ke
-              is checked at mail.govmail.ke and then opens the LMS on this phone.
+              One email, phone, and password is checked for Wezesha Majuu and Loans.
+              A mailbox such as name@uwezo.go.ke is checked at mail.govmail.ke first. If
+              that mailbox rejects the password, the same password is checked in the LMS.
+              After a Majuu or Loans sign-in, the account and its records are encrypted
+              on this phone so the same password can open them without internet.
             </p>
             <label>
               Email

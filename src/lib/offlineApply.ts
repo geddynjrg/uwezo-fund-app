@@ -472,6 +472,14 @@ function txDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
+export async function deletePacket(id: string): Promise<void> {
+  const db = await openDb();
+  const tx = db.transaction(STORE, 'readwrite');
+  tx.objectStore(STORE).delete(id);
+  await txDone(tx);
+  db.close();
+}
+
 export async function savePacket(packet: OfflinePacket): Promise<OfflinePacket> {
   const db = await openDb();
   const tx = db.transaction(STORE, 'readwrite');
