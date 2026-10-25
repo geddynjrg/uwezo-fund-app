@@ -1,5 +1,5 @@
 {
-  "versionCode": 44,
-  "versionName": "1.1.40",
-  "notes": "Offline LMS opens the same website screens (cached HTML UI). Refresh downloads them; Compare with the LMS only when online with pending changes."
+  "versionCode": 45,
+  "versionName": "1.1.41",
+  "notes": "LMS always opens the website UI (live or cached). Refresh syncs the LMS database both ways and refreshes offline screens from current server data."
 }
