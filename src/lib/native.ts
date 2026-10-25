@@ -47,6 +47,24 @@ type UwezoNativePlugin = {
     baseUrl?: string;
     offline?: boolean;
   }): Promise<{ opened?: boolean }>;
+  showLmsEmbed(options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    url?: string;
+    cookie?: string;
+    html?: string;
+    baseUrl?: string;
+    offline?: boolean;
+  }): Promise<{ shown?: boolean }>;
+  setLmsEmbedBounds(options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<{ ok?: boolean }>;
+  hideLmsEmbed(): Promise<{ hidden?: boolean }>;
   saveLmsOfflinePage(options: { path: string; html: string }): Promise<{ saved?: boolean }>;
   readLmsOfflinePage(options: { path: string }): Promise<{ found?: boolean; html?: string }>;
   checkForUpdate(): Promise<NativeUpdateInfo>;
@@ -159,7 +177,57 @@ export async function getNativeVersion(): Promise<NativeVersion | null> {
   }
 }
 
-/** Open the live LMS (or an offline HTML shell) in a first-party WebView. */
+export type LmsEmbedBounds = { x: number; y: number; width: number; height: number };
+
+/** Embed LMS (live URL or offline HTML) inside the app under the LMS header. */
+export async function showLmsEmbed(
+  bounds: LmsEmbedBounds,
+  options: {
+    url?: string;
+    cookie?: string;
+    html?: string;
+    baseUrl?: string;
+    offline?: boolean;
+  },
+): Promise<boolean> {
+  if (!options.url && !options.html) return false;
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+  try {
+    const result = await UwezoNative.showLmsEmbed({
+      ...bounds,
+      url: options.url,
+      cookie: options.cookie,
+      html: options.html,
+      baseUrl: options.baseUrl || 'https://lms.uwezo.go.ke/',
+      offline: Boolean(options.offline || options.html),
+    });
+    return Boolean(result.shown);
+  } catch {
+    return false;
+  }
+}
+
+export async function setLmsEmbedBounds(bounds: LmsEmbedBounds): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await UwezoNative.setLmsEmbedBounds(bounds);
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function hideLmsEmbed(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await UwezoNative.hideLmsEmbed();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Fallback: open LMS in a separate activity (older path). */
 export async function openLmsSession(
   url: string,
   cookie = '',

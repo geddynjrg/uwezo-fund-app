@@ -141,6 +141,7 @@ public class UwezoNativePlugin extends Plugin {
 
   @PluginMethod
   public void openLmsSession(PluginCall call) {
+    // Prefer in-app embed; keep Activity open as fallback for older callers.
     String url = call.getString("url", "");
     String cookie = call.getString("cookie", "");
     String html = call.getString("html", "");
@@ -171,6 +172,59 @@ public class UwezoNativePlugin extends Plugin {
     activity.startActivity(intent);
     JSObject ret = new JSObject();
     ret.put("opened", true);
+    call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void showLmsEmbed(PluginCall call) {
+    Activity activity = getActivity();
+    if (activity == null) {
+      call.reject("No activity");
+      return;
+    }
+    double density = activity.getResources().getDisplayMetrics().density;
+    int left = (int) Math.round(call.getDouble("x", 0.0) * density);
+    int top = (int) Math.round(call.getDouble("y", 0.0) * density);
+    int width = (int) Math.round(call.getDouble("width", 0.0) * density);
+    int height = (int) Math.round(call.getDouble("height", 0.0) * density);
+    String url = call.getString("url", "");
+    String cookie = call.getString("cookie", "");
+    String html = call.getString("html", "");
+    String baseUrl = call.getString("baseUrl", "https://lms.uwezo.go.ke/");
+    boolean offline = Boolean.TRUE.equals(call.getBoolean("offline", false));
+    LmsEmbedController.get(activity)
+        .show(left, top, width, height, url, cookie, html, baseUrl, offline);
+    JSObject ret = new JSObject();
+    ret.put("shown", true);
+    call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void setLmsEmbedBounds(PluginCall call) {
+    Activity activity = getActivity();
+    if (activity == null) {
+      call.reject("No activity");
+      return;
+    }
+    double density = activity.getResources().getDisplayMetrics().density;
+    int left = (int) Math.round(call.getDouble("x", 0.0) * density);
+    int top = (int) Math.round(call.getDouble("y", 0.0) * density);
+    int width = (int) Math.round(call.getDouble("width", 0.0) * density);
+    int height = (int) Math.round(call.getDouble("height", 0.0) * density);
+    LmsEmbedController.get(activity).setBounds(left, top, width, height);
+    JSObject ret = new JSObject();
+    ret.put("ok", true);
+    call.resolve(ret);
+  }
+
+  @PluginMethod
+  public void hideLmsEmbed(PluginCall call) {
+    Activity activity = getActivity();
+    if (activity != null) {
+      LmsEmbedController.get(activity).hide();
+    }
+    JSObject ret = new JSObject();
+    ret.put("hidden", true);
     call.resolve(ret);
   }
 
