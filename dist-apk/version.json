@@ -1,6 +1,6 @@
 {
-  "versionCode": 48,
-  "versionName": "1.1.44",
+  "versionCode": 49,
+  "versionName": "1.1.45",
   "apk": "UwezoFund.apk",
-  "notes": "On login when LMS is reachable, sync every menu page and the encrypted constituency database. Offline opens only when both are ready."
+  "notes": "React LMS rebuild (Option B): role-gated in-app screens replace WebView HTML cache; Sync encrypts constituency DB."
 }

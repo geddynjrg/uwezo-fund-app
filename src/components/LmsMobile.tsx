@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { useState, useEffect, useRef } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LmsOffline } from './LmsOffline';
 import { MailBox } from './MailBox';
+import { LmsReactHost } from '../lms/LmsReactHost';
+import { menuForRole } from '../lms/registry';
 import {
-  LMS_PAGES,
   cacheHasFigures,
   loadLmsCache,
   openLmsFromZimbra,
@@ -14,9 +14,8 @@ import {
 } from '../lib/lmsSync';
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
-import { pendingMutationCount } from '../lib/lmsLocalDb';
-import { isLmsOfflineReady, resolveCachedPageHtml } from '../lib/lmsPageShell';
-import { hideLmsEmbed, setLmsEmbedBounds, showLmsEmbed } from '../lib/native';
+import { loadLmsMeta, pendingMutationCount } from '../lib/lmsLocalDb';
+import { hideLmsEmbed } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
 import { isUwezoMailbox, setMailboxPassword, standardMailboxPassword } from '../lib/zimbraAuth';
@@ -35,22 +34,11 @@ type LmsMobileProps = {
   onLogout: () => void;
 };
 
-function readBounds(el: HTMLElement | null) {
-  if (!el) return null;
-  const rect = el.getBoundingClientRect();
-  if (rect.width < 8 || rect.height < 8) return null;
-  return {
-    x: Math.max(0, rect.left),
-    y: Math.max(0, rect.top),
-    width: Math.max(1, rect.width),
-    height: Math.max(1, rect.height),
-  };
-}
-
 export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
-  const [, setRevision] = useState(0);
+  const [revision, setRevision] = useState(0);
   const cache = loadLmsCache(officer.email);
-  const pages = (cache?.menu && cache.menu.length ? cache.menu : LMS_PAGES[officer.role]) || LMS_PAGES.staff;
+  const role = (cache?.role || officer.role) as LmsRole;
+  const pages = menuForRole(officer.email, role);
   const [page, setPage] = useState(pages[0]?.id || 'dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [section, setSection] = useState<'pages' | 'mail' | 'password' | 'database'>('pages');
@@ -61,44 +49,22 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [webHtml, setWebHtml] = useState('');
-  const [webSrc, setWebSrc] = useState('');
+  const [hasLocalDb, setHasLocalDb] = useState(Boolean(lmsDbVaultStatus(officer.email)));
   const bootDone = useRef('');
-  const embedSlot = useRef<HTMLDivElement | null>(null);
-  const current = pages.find((item) => item.id === page) || pages[0];
-  const role = cache?.role || officer.role;
-  const showCompare = lmsOnline === true && pending > 0;
-  const showEmbed = section === 'pages';
-
-  const syncEmbedBounds = useCallback(async () => {
-    if (!Capacitor.isNativePlatform() || !showEmbed) return;
-    const bounds = readBounds(embedSlot.current);
-    if (!bounds) return;
-    await setLmsEmbedBounds(bounds);
-  }, [showEmbed]);
 
   useEffect(() => {
-    if (!showEmbed) {
-      void hideLmsEmbed();
-      return;
-    }
-    void syncEmbedBounds();
-    const onResize = () => {
-      void syncEmbedBounds();
-    };
-    window.addEventListener('resize', onResize);
-    const timer = window.setInterval(() => {
-      void syncEmbedBounds();
-    }, 800);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.clearInterval(timer);
-    };
-  }, [showEmbed, menuOpen, notice, syncEmbedBounds]);
-
-  useEffect(() => () => {
+    // Tear down any leftover WebView embed from older builds
     void hideLmsEmbed();
+    return () => {
+      void hideLmsEmbed();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!pages.find((item) => item.id === page) && pages[0]) {
+      setPage(pages[0].id);
+    }
+  }, [pages, page]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +77,8 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       }
       let count = await pendingMutationCount(officer.email);
       if (!cancelled) setPending(count);
+      const meta = await loadLmsMeta(officer.email);
+      if (!cancelled) setHasLocalDb(Boolean(meta || lmsDbVaultStatus(officer.email)));
 
       const online = await probeOrigin('https://lms.uwezo.go.ke');
       if (cancelled) return;
@@ -121,22 +89,19 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           setNotice('Signing in to LMS…');
           await refreshSessionQuiet();
         }
-        setNotice('Syncing all LMS pages and encrypted data…');
+        setNotice('Syncing encrypted LMS data…');
         const synced = await syncLmsLocal(officer.email);
         if (cancelled) return;
-        const ready = isLmsOfflineReady(officer.email);
-        setNotice(synced.ok ? ready.detail : synced.detail);
+        setNotice(synced.detail);
         count = await pendingMutationCount(officer.email);
         setPending(count);
-        await openLmsPage(current?.path || '/dashboard', true);
+        setHasLocalDb(Boolean(lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))));
+        setRevision((value) => value + 1);
+      } else if (lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))) {
+        setNotice('');
+        setHasLocalDb(true);
       } else {
-        const ready = isLmsOfflineReady(officer.email);
-        if (ready.ready) {
-          setNotice('');
-          await openLmsPage(current?.path || '/dashboard', false);
-        } else {
-          setNotice(ready.detail);
-        }
+        setNotice('Offline — sync once online to download encrypted LMS data.');
       }
     })();
     return () => {
@@ -162,80 +127,15 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
 
   async function refresh() {
     setBusy(true);
-    setNotice('Syncing all LMS pages and encrypted data…');
+    setNotice('Syncing encrypted LMS data…');
     await refreshSessionQuiet();
-    const result = await refreshLmsConnection(officer.email, current?.path || '/dashboard');
+    const result = await refreshLmsConnection(officer.email, pages.find((item) => item.id === page)?.path || '/dashboard');
     setLmsOnline(result.online);
     setPending(await pendingMutationCount(officer.email));
-    const ready = isLmsOfflineReady(officer.email);
-    setNotice(result.online ? (result.ok ? ready.detail : result.detail) : ready.ready ? ready.detail : result.detail);
+    setHasLocalDb(Boolean(lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))));
+    setNotice(result.detail);
     setRevision((value) => value + 1);
     setBusy(false);
-    if (section === 'pages') await openLmsPage(current?.path, result.online);
-  }
-
-  async function openLmsPage(path?: string, forceOnline?: boolean) {
-    const pagePath = path || current?.path || '/dashboard';
-    const host = loadLmsCache(officer.email)?.host || cache?.host || 'https://lms.uwezo.go.ke';
-    const online =
-      forceOnline === true
-      || (forceOnline !== false && (lmsOnline === true || (await probeOrigin('https://lms.uwezo.go.ke'))));
-    if (online !== lmsOnline) setLmsOnline(online);
-
-    // Wait a frame so the embed slot has layout
-    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
-    const bounds = readBounds(embedSlot.current) || { x: 0, y: 120, width: window.innerWidth, height: Math.max(240, window.innerHeight - 120) };
-
-    if (!online) {
-      const html = await resolveCachedPageHtml(officer.email, pagePath);
-      if (!html) {
-        setNotice('Screen not cached — Sync online');
-        return;
-      }
-      setBusy(true);
-      if (Capacitor.isNativePlatform()) {
-        const shown = await showLmsEmbed(bounds, {
-          html,
-          baseUrl: `${host}/`,
-          offline: true,
-        });
-        setBusy(false);
-        setNotice(shown ? '' : 'Could not show offline LMS');
-      } else {
-        setWebSrc('');
-        setWebHtml(html);
-        setBusy(false);
-        setNotice('');
-      }
-      return;
-    }
-
-    let cookie = loadLmsCache(officer.email)?.cookie || cache?.cookie || '';
-    if (!cookie) {
-      await refreshSessionQuiet();
-      cookie = loadLmsCache(officer.email)?.cookie || '';
-    }
-    if (!cookie) {
-      setNotice('Could not open the live LMS. Tap Refresh, then try again.');
-      return;
-    }
-    const target = `${host}${pagePath}`;
-    setBusy(true);
-    if (Capacitor.isNativePlatform()) {
-      const shown = await showLmsEmbed(bounds, {
-        url: target,
-        cookie,
-        baseUrl: `${host}/`,
-        offline: false,
-      });
-      setBusy(false);
-      setNotice(shown ? '' : 'Could not embed LMS');
-    } else {
-      setWebHtml('');
-      setWebSrc(target);
-      setBusy(false);
-      setNotice('');
-    }
   }
 
   async function sendOfflineChanges() {
@@ -245,7 +145,8 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     setBusy(false);
     setNotice(result.detail);
     setPending(await pendingMutationCount(officer.email));
-    if (result.ok && section === 'pages') await openLmsPage(current?.path, true);
+    setHasLocalDb(Boolean(lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))));
+    setRevision((value) => value + 1);
   }
 
   async function changeMailboxPassword() {
@@ -277,15 +178,24 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   }
 
   function leavePages(next: 'mail' | 'password' | 'database') {
-    void hideLmsEmbed();
     setSection(next);
     setMenuOpen(false);
   }
 
   const reset = officer.passwordReset || loadStaffSession()?.passwordReset;
+  const showCompare = lmsOnline === true && pending > 0;
+  const statusLine =
+    notice
+    || (lmsOnline === null
+      ? 'Checking LMS…'
+      : lmsOnline
+        ? `React LMS${pending ? ` · ${pending} to send` : ''}${role === 'constituency' && !hasLocalDb ? ' · sync needed' : ''}`
+        : hasLocalDb
+          ? 'React LMS (offline)'
+          : 'Offline — sync once online');
 
   return (
-    <main className="lms-app lms-app--embed">
+    <main className="lms-app lms-app--react">
       <header className="lms-bar">
         <button type="button" className="lms-menu-btn" onClick={() => setMenuOpen((open) => !open)} aria-label="Open LMS menu">
           Menu
@@ -301,14 +211,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         <button type="button" className="lms-menu-btn" onClick={() => leavePages('mail')}>
           Mail
         </button>
-        <button
-          type="button"
-          className="lms-menu-btn"
-          onClick={() => {
-            void hideLmsEmbed();
-            onBack();
-          }}
-        >
+        <button type="button" className="lms-menu-btn" onClick={onBack}>
           Close
         </button>
       </header>
@@ -324,7 +227,6 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
                 setPage(item.id);
                 setSection('pages');
                 setMenuOpen(false);
-                void openLmsPage(item.path);
               }}
             >
               <small>{item.group}</small>
@@ -345,14 +247,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
               Change email password
             </button>
           ) : null}
-          <button
-            type="button"
-            className="lms-link"
-            onClick={() => {
-              void hideLmsEmbed();
-              onLogout();
-            }}
-          >
+          <button type="button" className="lms-link" onClick={onLogout}>
             <small>Account</small>
             Log out
           </button>
@@ -399,18 +294,9 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
           </form>
         </section>
       ) : (
-        <>
-          <div className="lms-embed-toolbar">
-            <p className="lms-note">
-              {notice
-                || (lmsOnline === null
-                  ? 'Checking LMS…'
-                  : lmsOnline
-                    ? `In-app LMS${pending ? ` · ${pending} to send` : ''}${isLmsOfflineReady(officer.email).ready ? '' : ' · sync needed for offline'}`
-                    : isLmsOfflineReady(officer.email).ready
-                      ? 'In-app LMS (offline)'
-                      : 'Offline — sync once online')}
-            </p>
+        <div className="lms-react">
+          <div className="lms-react__toolbar">
+            <p className="lms-note">{statusLine}</p>
             <div className="doc-actions">
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => void refresh()}>
                 {busy ? 'Syncing…' : 'Sync'}
@@ -422,20 +308,22 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
               ) : null}
             </div>
           </div>
-          <div className="lms-embed-slot" ref={embedSlot}>
-            {!Capacitor.isNativePlatform() ? (
-              webHtml ? (
-                <iframe className="lms-embed-frame" title="Uwezo LMS" srcDoc={webHtml} />
-              ) : webSrc ? (
-                <iframe className="lms-embed-frame" title="Uwezo LMS" src={webSrc} />
-              ) : (
-                <p className="home-chat-note">Loading LMS…</p>
-              )
-            ) : (
-              <p className="lms-embed-placeholder home-chat-note">{busy ? 'Loading LMS…' : 'LMS screens load here inside the app.'}</p>
-            )}
-          </div>
-        </>
+          <LmsReactHost
+            pageId={page}
+            email={officer.email}
+            role={role}
+            constituency={officer.constituency}
+            online={lmsOnline}
+            busy={busy}
+            setBusy={setBusy}
+            setNotice={setNotice}
+            onNavigate={(next) => {
+              setPage(next);
+              setSection('pages');
+            }}
+            revision={revision}
+          />
+        </div>
       )}
     </main>
   );

@@ -1,0 +1,286 @@
+/* AdminLTE-inspired LMS UI inside the Uwezo app */
+
+.lms-react {
+  --lms-primary: #7a1f6a;
+  --lms-info: #17a2b8;
+  --lms-success: #28a745;
+  --lms-warning: #ffc107;
+  --lms-danger: #dc3545;
+  --lms-dark: #343a40;
+  --lms-muted: #6c757d;
+  --lms-line: #dee2e6;
+  --lms-bg: #f4f6f9;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  background: var(--lms-bg);
+  color: #212529;
+  font-size: 0.9rem;
+}
+
+.lms-react__toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0.65rem;
+  background: #fff;
+  border-bottom: 1px solid var(--lms-line);
+}
+
+.lms-react__toolbar .lms-note {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lms-react__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.75rem 0.65rem 1.25rem;
+}
+
+.lms-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.lms-page-head h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.lms-page-head h1 span {
+  color: var(--lms-primary);
+}
+
+.lms-crumb {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--lms-muted);
+}
+
+.lms-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+@media (min-width: 720px) {
+  .lms-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.lms-stat {
+  border-radius: 0.35rem;
+  padding: 0.7rem 0.75rem 0.55rem;
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  min-height: 5.2rem;
+}
+
+.lms-stat--info { background: var(--lms-info); }
+.lms-stat--primary { background: var(--lms-primary); }
+.lms-stat--warning { background: #e0a800; color: #212529; }
+.lms-stat--success { background: var(--lms-success); }
+
+.lms-stat h3 {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.lms-stat p {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.95;
+}
+
+.lms-stat button {
+  display: block;
+  margin-top: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.lms-card {
+  background: #fff;
+  border: 1px solid var(--lms-line);
+  border-radius: 0.35rem;
+  margin-bottom: 0.85rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.lms-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--lms-line);
+  border-top: 3px solid var(--lms-primary);
+}
+
+.lms-card__head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.lms-card__body {
+  padding: 0.65rem 0.75rem;
+}
+
+.lms-card__body--flush {
+  padding: 0;
+}
+
+.lms-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.65rem;
+}
+
+.lms-tools input,
+.lms-tools select {
+  flex: 1 1 10rem;
+  min-width: 0;
+  border: 1px solid var(--lms-line);
+  border-radius: 0.3rem;
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  background: #fff;
+}
+
+.lms-table-wrap {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.lms-table th,
+.lms-table td {
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--lms-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.lms-table th {
+  background: #f8f9fa;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lms-table tr:nth-child(even) td {
+  background: #fcfcfd;
+}
+
+.lms-badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #e9ecef;
+  color: #343a40;
+}
+
+.lms-badge--ok { background: #d4edda; color: #155724; }
+.lms-badge--warn { background: #fff3cd; color: #856404; }
+.lms-badge--info { background: #d1ecf1; color: #0c5460; }
+.lms-badge--danger { background: #f8d7da; color: #721c24; }
+
+.lms-empty {
+  margin: 0;
+  padding: 1.25rem 0.75rem;
+  text-align: center;
+  color: var(--lms-muted);
+}
+
+.lms-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.lms-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.lms-form input,
+.lms-form select,
+.lms-form textarea {
+  border: 1px solid var(--lms-line);
+  border-radius: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  font-weight: 400;
+}
+
+.lms-muted {
+  color: var(--lms-muted);
+  font-size: 0.82rem;
+}
+
+.lms-linkish {
+  border: 0;
+  background: none;
+  color: var(--lms-primary);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.lms-placeholder {
+  padding: 1rem;
+  background: #fff;
+  border: 1px dashed var(--lms-line);
+  border-radius: 0.35rem;
+}
+
+.lms-placeholder h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.lms-app--react {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}

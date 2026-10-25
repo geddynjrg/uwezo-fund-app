@@ -1,7 +1,6 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { lmsDbVaultStatus, sealLmsDatabase } from './lmsDbVault';
-import { cacheLmsPageShells, isLmsOfflineReady } from './lmsPageShell';
-import { loadLmsCache, menuForEmail } from './lmsSync';
+import { loadLmsCache } from './lmsSync';
 import {
   LMS_TABLES,
   listOutbox,
@@ -182,11 +181,10 @@ async function sealIfPossible(email: string): Promise<boolean> {
 }
 
 /**
- * Full data sync with the online LMS when reachable:
+ * Sync encrypted LMS data when reachable (React LMS — no HTML shell cache):
  * 1) push phone changes
- * 2) pull constituency tables for this user
- * 3) download every menu screen for offline use
- * 4) encrypt the offline database vault
+ * 2) pull constituency tables for this user (when assigned)
+ * 3) encrypt the offline database vault
  */
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
   const cache = loadLmsCache(email);
@@ -196,8 +194,6 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
 
   const pushed = await pushLmsMutations(email);
   const pulled = await pullLmsSnapshot(email);
-  const menu = menuForEmail(email);
-  const shells = await cacheLmsPageShells(email, menu);
 
   let sealed = false;
   if (pulled.ok) {
@@ -206,7 +202,7 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
     sealed = true;
   }
 
-  const ready = isLmsOfflineReady(email);
+  const role = cache.role || 'staff';
   const counts = pulled.meta?.counts
     ? Object.entries(pulled.meta.counts)
         .map(([name, value]) => `${name}:${value}`)
@@ -214,17 +210,25 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
     : '';
   const parts = [
     pushed.detail,
-    pulled.ok ? `Pulled LMS database${counts ? ` (${counts})` : ''}.` : pulled.detail,
-    shells.detail,
+    pulled.ok
+      ? `Pulled LMS database${counts ? ` (${counts})` : ''}.`
+      : role === 'constituency'
+        ? pulled.detail
+        : 'National / HQ roles use the live session; constituency encrypted DB sync is for assigned officers.',
     sealed
       ? 'Encrypted LMS database saved on this phone.'
       : pulled.ok
         ? 'Could not encrypt LMS database (sign-in password needed on this phone).'
-        : '',
-    ready.ready ? ready.detail : `Not fully offline-ready — ${ready.detail}`,
+        : lmsDbVaultStatus(email)
+          ? 'Using the encrypted LMS database already on this phone.'
+          : '',
   ].filter(Boolean);
 
-  const ok = Boolean(pulled.ok && shells.ok && sealed && ready.ready);
+  const ok =
+    role === 'constituency'
+      ? Boolean(pulled.ok && sealed)
+      : Boolean(cache.cookie) || sealed;
+
   return {
     ok,
     detail: parts.join(' '),
@@ -255,7 +259,7 @@ export async function refreshLmsConnection(email: string, path = '/dashboard'): 
     return {
       ok: false,
       online: false,
-      detail: 'lms.uwezo.go.ke did not answer. Opening the last synced LMS screens offline.',
+      detail: 'lms.uwezo.go.ke did not answer. Opening the React LMS from data already on this phone.',
       meta: await loadLmsMeta(email),
     };
   }
