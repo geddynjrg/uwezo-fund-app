@@ -27,7 +27,7 @@ type HomeProps = {
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.2.5';
+const PACKAGE_VERSION = '1.2.6';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();

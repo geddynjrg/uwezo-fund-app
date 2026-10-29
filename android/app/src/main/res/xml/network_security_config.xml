@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!--
+      eBoard is served on raw public IPs. The TLS cert SAN is only 197.248.181.146,
+      so HTTPS to 41.76.170.244 always fails certificate checks. Allow cleartext HTTP
+      to both IPs so CapacitorHttp / WebView can reach the live host.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">41.76.170.244</domain>
+        <domain includeSubdomains="false">197.248.181.146</domain>
+    </domain-config>
     <domain-config>
         <domain includeSubdomains="true">govmail.ke</domain>
         <domain includeSubdomains="true">ecitizen.go.ke</domain>
