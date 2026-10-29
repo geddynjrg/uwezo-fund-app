@@ -19,6 +19,14 @@ export type MailItem = {
   subject: string;
   preview: string;
   date: string;
+  /** Short label for list (e.g. 10:42 or 24 Oct). */
+  whenShort: string;
+  unread: boolean;
+  starred: boolean;
+  hasAttachment: boolean;
+  /** Conversation message count when listing threads. */
+  threadCount?: number;
+  isConversation?: boolean;
 };
 
 export type MailPart = {
@@ -38,6 +46,7 @@ export type MailDetail = {
   html: string;
   date: string;
   attachments: MailPart[];
+  starred?: boolean;
 };
 
 export type MailAttachment = { name: string; type: string; base64: string };
@@ -45,11 +54,14 @@ export type MailAttachment = { name: string; type: string; base64: string };
 export type MailPayload = {
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   html: string;
   attachments?: MailAttachment[];
   signature?: MailAttachment | null;
   origId?: string;
+  /** Zimbra reply type: r = reply, w = forward */
+  replyType?: 'r' | 'w';
 };
 
 const ACCOUNT_HOST = 'https://mail.govmail.ke';
@@ -75,6 +87,25 @@ function when(stamp: number): string {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
 }
 
+function whenShort(stamp: number): string {
+  if (!stamp) return '';
+  const ms = stamp < 1e12 ? stamp * 1000 : stamp;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  }
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short', year: '2-digit' });
+}
+
 function addresses(xml: string, type: string): string[] {
   const found: string[] = [];
   for (const match of xml.matchAll(/<e\b([^>]*)\/?>/g)) {
@@ -96,23 +127,46 @@ function splitAddresses(value: string): string[] {
     .filter((item) => item.includes('@'));
 }
 
+function parseHit(tag: 'm' | 'c', attrs: string, body: string): MailItem | null {
+  const id = /id="([^"]+)"/.exec(attrs)?.[1] || '';
+  if (!id) return null;
+  const from = addresses(body, 'f')[0] || '';
+  const to = addresses(body, 't')[0] || '';
+  const flags = /\bf="([^"]*)"/.exec(attrs)?.[1] || '';
+  const stamp = Number(/\sd="(\d+)"/.exec(attrs)?.[1] || 0);
+  const nmsgs = Number(/\bn="(\d+)"/.exec(attrs)?.[1] || (tag === 'c' ? 0 : 1));
+  return {
+    id,
+    from,
+    to,
+    subject: textOf(body.match(/<su\b[^>]*>([\s\S]*?)<\/su>/)?.[1] || '') || '(no subject)',
+    preview: textOf(body.match(/<fr\b[^>]*>([\s\S]*?)<\/fr>/)?.[1] || ''),
+    date: when(stamp),
+    whenShort: whenShort(stamp),
+    unread: flags.includes('u'),
+    starred: flags.includes('f'),
+    hasAttachment: flags.includes('a') || /filename=/i.test(body),
+    threadCount: nmsgs > 1 ? nmsgs : undefined,
+    isConversation: tag === 'c',
+  };
+}
+
 export function parseMessages(xml: string): MailItem[] {
   const items: MailItem[] = [];
+  const seen = new Set<string>();
+  for (const match of xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+    const item = parseHit('c', match[1], match[2]);
+    if (item && !seen.has(item.id)) {
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
   for (const match of xml.matchAll(/<m\b([^>]*)>([\s\S]*?)<\/m>/g)) {
-    const attrs = match[1];
-    const body = match[2];
-    const id = /id="([^"]+)"/.exec(attrs)?.[1] || '';
-    if (!id) continue;
-    const from = addresses(body, 'f')[0] || '';
-    const to = addresses(body, 't')[0] || '';
-    items.push({
-      id,
-      from,
-      to,
-      subject: textOf(body.match(/<su\b[^>]*>([\s\S]*?)<\/su>/)?.[1] || '') || '(no subject)',
-      preview: textOf(body.match(/<fr\b[^>]*>([\s\S]*?)<\/fr>/)?.[1] || ''),
-      date: when(Number(/\sd="(\d+)"/.exec(attrs)?.[1] || 0)),
-    });
+    const item = parseHit('m', match[1], match[2]);
+    if (item && !seen.has(item.id)) {
+      seen.add(item.id);
+      items.push(item);
+    }
   }
   return items;
 }
@@ -196,15 +250,45 @@ async function call(token: string, body: string): Promise<{ ok: boolean; xml: st
   }
 }
 
-export async function listMail(token: string, query: string) {
+export type ListMailOptions = {
+  query: string;
+  limit?: number;
+  offset?: number;
+  /** message | conversation */
+  types?: 'message' | 'conversation';
+};
+
+export async function listMail(token: string, queryOrOptions: string | ListMailOptions) {
+  const options: ListMailOptions =
+    typeof queryOrOptions === 'string' ? { query: queryOrOptions } : queryOrOptions;
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+  const types = options.types ?? 'conversation';
   return call(
     token,
-    `<SearchRequest xmlns="urn:zimbraMail" types="message" limit="25" offset="0"><query>${xmlEscape(query)}</query></SearchRequest>`,
+    `<SearchRequest xmlns="urn:zimbraMail" types="${types}" limit="${limit}" offset="${offset}"><query>${xmlEscape(options.query)}</query></SearchRequest>`,
   );
+}
+
+/** Merge folder query with free-text / Gmail-style operators from the search box. */
+export function buildMailQuery(folderQuery: string, search: string): string {
+  const q = search.trim();
+  if (!q) return folderQuery;
+  if (/^(in:|from:|to:|subject:|has:|is:|after:|before:)/i.test(q) || /\bin:/.test(q)) {
+    return q;
+  }
+  return `${folderQuery} (${q})`;
 }
 
 export async function readMail(token: string, id: string) {
   return call(token, `<GetMsgRequest xmlns="urn:zimbraMail"><m id="${xmlEscape(id)}" html="1" read="1"/></GetMsgRequest>`);
+}
+
+export async function readConversation(token: string, id: string) {
+  return call(
+    token,
+    `<SearchConvRequest xmlns="urn:zimbraMail" cid="${xmlEscape(id)}" limit="50" offset="0" fetch="u!"><query>is:anywhere</query></SearchConvRequest>`,
+  );
 }
 
 export async function fetchAttachment(
@@ -283,9 +367,11 @@ function plainText(html: string): string {
 function recipientXml(message: MailPayload): string {
   const to = splitAddresses(message.to);
   const cc = splitAddresses(message.cc || '');
+  const bcc = splitAddresses(message.bcc || '');
   return [
     ...to.map((address) => `<e t="t" a="${xmlEscape(address)}"/>`),
     ...cc.map((address) => `<e t="c" a="${xmlEscape(address)}"/>`),
+    ...bcc.map((address) => `<e t="b" a="${xmlEscape(address)}"/>`),
   ].join('');
 }
 
@@ -356,7 +442,8 @@ function inlineMessageXml(message: MailPayload, attachAids: string[]): string {
     .join('');
   const body = inlineFiles ? `<mp ct="multipart/mixed">${related}${inlineFiles}</mp>` : related;
   const attach = attachAids.length ? `<attach aid="${xmlEscape(attachAids.join(','))}"/>` : '';
-  const reply = message.origId ? ` origid="${xmlEscape(message.origId)}" rt="r"` : '';
+  const rt = message.replyType || 'r';
+  const reply = message.origId ? ` origid="${xmlEscape(message.origId)}" rt="${rt}"` : '';
   return `<m${reply}>${recipientXml(message)}<su>${xmlEscape(message.subject)}</su>${body}${attach}</m>`;
 }
 
@@ -383,14 +470,50 @@ export async function saveDraft(token: string, message: MailPayload) {
   return call(token, `<SaveDraftRequest xmlns="urn:zimbraMail">${inlineMessageXml(message, [])}</SaveDraftRequest>`);
 }
 
-export async function moveMail(token: string, ids: string | string[], op: 'trash' | 'spam' | 'archive' | 'delete') {
+function actionXml(ids: string | string[], op: string, conversation: boolean) {
   const id = (Array.isArray(ids) ? ids : [ids]).filter(Boolean).join(',');
-  if (!id) return { ok: false, xml: '', authFailed: false, detail: 'Select a message first.' };
-  return call(token, `<MsgActionRequest xmlns="urn:zimbraMail"><action id="${xmlEscape(id)}" op="${op}"/></MsgActionRequest>`);
+  if (!id) return '';
+  const tag = conversation ? 'ConvActionRequest' : 'MsgActionRequest';
+  return `<${tag} xmlns="urn:zimbraMail"><action id="${xmlEscape(id)}" op="${xmlEscape(op)}"/></${tag}>`;
+}
+
+export async function moveMail(
+  token: string,
+  ids: string | string[],
+  op: 'trash' | 'spam' | 'archive' | 'delete',
+  conversation = false,
+) {
+  const body = actionXml(ids, op, conversation);
+  if (!body) return { ok: false, xml: '', authFailed: false, detail: 'Select a message first.' };
+  return call(token, body);
+}
+
+/** Toggle the flagged/starred state (Zimbra flag `f`). */
+export async function flagMail(token: string, ids: string | string[], starred: boolean, conversation = false) {
+  const body = actionXml(ids, starred ? 'flag' : '!flag', conversation);
+  if (!body) return { ok: false, xml: '', authFailed: false, detail: 'Select a message first.' };
+  return call(token, body);
+}
+
+export async function markMailRead(
+  token: string,
+  ids: string | string[],
+  read: boolean,
+  conversation = false,
+) {
+  const body = actionXml(ids, read ? 'read' : '!read', conversation);
+  if (!body) return { ok: false, xml: '', authFailed: false, detail: 'Select a message first.' };
+  return call(token, body);
 }
 
 export function replySubject(subject: string): string {
   return /^re:/i.test(subject.trim()) ? subject.trim() : `Re: ${subject.trim() || '(no subject)'}`;
+}
+
+export function forwardSubject(subject: string): string {
+  return /^fwd:/i.test(subject.trim()) || /^fw:/i.test(subject.trim())
+    ? subject.trim()
+    : `Fwd: ${subject.trim() || '(no subject)'}`;
 }
 
 export function quoteHtml(detail: MailDetail): string {
@@ -400,6 +523,21 @@ export function quoteHtml(detail: MailDetail): string {
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/\son\w+="[^"]*"/gi, '');
   return `<p></p><p>On ${who}${whenText} wrote:</p><blockquote style="margin:0 0 0 8px;padding-left:8px;border-left:2px solid #999">${quoted}</blockquote>`;
+}
+
+export function quoteForwardHtml(detail: MailDetail): string {
+  const quoted = (detail.html || `<p>${xmlEscape(detail.body)}</p>`)
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+="[^"]*"/gi, '');
+  return (
+    `<p></p><p>---------- Forwarded message ---------</p>` +
+    `<p>From: ${xmlEscape(detail.from)}<br>` +
+    `Date: ${xmlEscape(detail.date || '')}<br>` +
+    `Subject: ${xmlEscape(detail.subject)}<br>` +
+    `To: ${xmlEscape(detail.to.join(', '))}` +
+    (detail.cc.length ? `<br>Cc: ${xmlEscape(detail.cc.join(', '))}` : '') +
+    `</p>${quoted}`
+  );
 }
 
 export function attachmentDataUrl(type: string, base64: string): string {

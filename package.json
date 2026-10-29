@@ -1,7 +1,7 @@
 {
   "name": "uwezo-fund-app",
   "private": true,
-  "version": "1.1.45",
+  "version": "1.2.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npm run cap:sync && npx cap open android",
-    "apk:debug": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug --no-daemon && cd .. && mkdir -p dist-apk && cp -f android/app/build/outputs/apk/debug/app-debug.apk dist-apk/UwezoFund.apk && cp -f dist-apk/UwezoFund.apk dist-apk/UwezoFund-debug.apk && ls -lh dist-apk/UwezoFund.apk"
+    "apk:debug": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug --no-daemon && cd .. && mkdir -p dist-apk && cp -f android/app/build/outputs/apk/debug/app-debug.apk dist-apk/UwezoFund.apk && cp -f dist-apk/UwezoFund.apk dist-apk/UwezoFund-debug.apk && ls -lh dist-apk/UwezoFund.apk",
+    "apk:release": "npm run build && npx cap sync android && cd android && ./gradlew assembleRelease --no-daemon && cd .. && mkdir -p dist-apk && cp -f android/app/build/outputs/apk/release/app-release.apk dist-apk/UwezoFund.apk && cp -f dist-apk/UwezoFund.apk dist-apk/UwezoFund-1.2.2.apk && printf '%s\\n' '{\"versionCode\":65,\"versionName\":\"1.2.2\",\"apkUrl\":\"https://loans.uwezo.go.ke/uwezo-app/UwezoFund.apk\",\"notes\":\"Fix Firebase crash; per-email LMS DB; application numbers; constituency name\"}' > dist-apk/version.json && ls -lh dist-apk/UwezoFund.apk"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
@@ -19,6 +20,7 @@
     "@capacitor/cli": "^8.5.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/local-notifications": "^8.0.2",
+    "@capacitor/push-notifications": "^8.1.3",
     "@capacitor/status-bar": "^8.0.3",
     "jsqr": "^1.4.0",
     "react": "^19.2.8",
@@ -37,5 +39,5 @@
     "typescript": "~6.0.2",
     "vite": "^8.2.2"
   },
-  "description": "Uwezo Fund PWA \u2014 Majuu, loans, website links, phone OTP chat, App QR login"
+  "description": "Uwezo Fund PWA — Majuu, loans, website links, phone OTP chat, App QR login"
 }

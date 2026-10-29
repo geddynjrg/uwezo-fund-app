@@ -1,7 +1,7 @@
-/** Local LMS tables on the phone (IndexedDB) — mirrors constituency-scoped LMS data. */
+/** Local LMS tables on the phone (IndexedDB) — one working DB per officer email. */
 
-const DB_NAME = 'uwezo-lms-local';
 const DB_VERSION = 1;
+const LEGACY_DB_NAME = 'uwezo-lms-local';
 
 export const LMS_TABLES = [
   'wards',
@@ -26,20 +26,76 @@ export type LmsLocalMeta = {
   pendingMutations: number;
 };
 
+export type LmsMutationType =
+  | 'receipt.create'
+  | 'receipt.update'
+  | 'receipt.void'
+  | 'member.update'
+  | 'member.create'
+  | 'member.delete'
+  | 'group.update'
+  | 'application.approve'
+  | 'application.reject'
+  | 'application.link'
+  | 'application.unlink'
+  | 'application.assign_phase'
+  | 'application.remove_phase'
+  | 'application.return'
+  | 'application.review'
+  | 'phase.create'
+  | 'phase.update'
+  | 'phase.submit';
+
 export type LmsOutboxItem = {
   id: string;
-  type: 'receipt.create';
+  type: LmsMutationType;
   createdAt: string;
   status: 'pending' | 'synced' | 'rejected';
   detail?: string;
-  payload: Record<string, string | number>;
+  payload: Record<string, string | number | boolean>;
 };
 
 type MetaRow = LmsLocalMeta & { id: 'meta' };
 
-function openDb(): Promise<IDBDatabase> {
+/** Active officer email for the working IndexedDB (per-email DB name). */
+let activeEmail = '';
+
+function normalizeEmail(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+function dbNameFor(email: string): string {
+  const e = normalizeEmail(email);
+  return e ? `${LEGACY_DB_NAME}:${e}` : LEGACY_DB_NAME;
+}
+
+/** Switch the working LMS DB to this officer. Call on every LMS boot / sync / vault open. */
+export function setLmsActiveEmail(email: string): void {
+  activeEmail = normalizeEmail(email);
+}
+
+export function getLmsActiveEmail(): string {
+  return activeEmail;
+}
+
+/** Ensure subsequent list/put calls use this officer’s isolated DB. */
+export async function ensureLmsWorkingCopyFor(email: string): Promise<void> {
+  setLmsActiveEmail(email);
+  // Touch DB so object stores exist; do not copy foreign rows from legacy shared DB.
+  await openDb(email);
+}
+
+function requireEmail(email?: string): string {
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) throw new Error('LMS local DB requires an active officer email.');
+  return e;
+}
+
+function openDb(email?: string): Promise<IDBDatabase> {
+  const e = requireEmail(email);
+  const name = dbNameFor(e);
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(name, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
@@ -61,6 +117,18 @@ function txDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
+async function metaMatchesActive(db: IDBDatabase, email: string): Promise<boolean> {
+  const tx = db.transaction('meta', 'readonly');
+  const row = await new Promise<MetaRow | undefined>((resolve, reject) => {
+    const req = tx.objectStore('meta').get('meta');
+    req.onsuccess = () => resolve(req.result as MetaRow | undefined);
+    req.onerror = () => reject(req.error);
+  });
+  await txDone(tx);
+  if (!row?.email) return true; // empty DB ok
+  return row.email === normalizeEmail(email);
+}
+
 export async function replaceLmsSnapshot(input: {
   email: string;
   fetchedAt: string;
@@ -70,12 +138,14 @@ export async function replaceLmsSnapshot(input: {
   counts: Record<string, number>;
   tables: Partial<Record<LmsTableName, Record<string, unknown>[]>>;
 }): Promise<void> {
-  const db = await openDb();
+  const email = normalizeEmail(input.email);
+  setLmsActiveEmail(email);
+  const db = await openDb(email);
   const storeNames = ['meta', ...LMS_TABLES] as string[];
   const tx = db.transaction(storeNames, 'readwrite');
   const meta: MetaRow = {
     id: 'meta',
-    email: input.email.trim().toLowerCase(),
+    email,
     fetchedAt: input.fetchedAt,
     constituencyCode: input.constituencyCode,
     constituencyName: input.constituencyName,
@@ -93,12 +163,13 @@ export async function replaceLmsSnapshot(input: {
     }
   }
   await txDone(tx);
-  const pending = await listOutbox('pending');
-  await setPendingCount(pending.length);
+  const pending = await listOutbox('pending', email);
+  await setPendingCount(pending.length, email);
 }
 
-async function setPendingCount(count: number): Promise<void> {
-  const db = await openDb();
+async function setPendingCount(count: number, email?: string): Promise<void> {
+  const e = requireEmail(email);
+  const db = await openDb(e);
   const tx = db.transaction('meta', 'readwrite');
   const store = tx.objectStore('meta');
   const current = await new Promise<MetaRow | undefined>((resolve, reject) => {
@@ -114,7 +185,10 @@ async function setPendingCount(count: number): Promise<void> {
 }
 
 export async function loadLmsMeta(email?: string): Promise<LmsLocalMeta | null> {
-  const db = await openDb();
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) return null;
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('meta', 'readonly');
   const row = await new Promise<MetaRow | undefined>((resolve, reject) => {
     const req = tx.objectStore('meta').get('meta');
@@ -123,13 +197,21 @@ export async function loadLmsMeta(email?: string): Promise<LmsLocalMeta | null> 
   });
   await txDone(tx);
   if (!row) return null;
-  if (email && row.email !== email.trim().toLowerCase()) return null;
+  if (row.email !== e) return null;
   const { id: _id, ...meta } = row;
   return meta;
 }
 
-export async function listLmsTable(table: LmsTableName, limit = 200): Promise<Record<string, unknown>[]> {
-  const db = await openDb();
+export async function listLmsTable(
+  table: LmsTableName,
+  limit = 200,
+  email?: string,
+): Promise<Record<string, unknown>[]> {
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) return [];
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
+  if (!(await metaMatchesActive(db, e))) return [];
   const tx = db.transaction(table, 'readonly');
   const rows = await new Promise<Record<string, unknown>[]>((resolve, reject) => {
     const req = tx.objectStore(table).getAll();
@@ -140,8 +222,12 @@ export async function listLmsTable(table: LmsTableName, limit = 200): Promise<Re
   return rows.slice(0, limit);
 }
 
-export async function countLmsTable(table: LmsTableName): Promise<number> {
-  const db = await openDb();
+export async function countLmsTable(table: LmsTableName, email?: string): Promise<number> {
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) return 0;
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
+  if (!(await metaMatchesActive(db, e))) return 0;
   const tx = db.transaction(table, 'readonly');
   const count = await new Promise<number>((resolve, reject) => {
     const req = tx.objectStore(table).count();
@@ -152,8 +238,13 @@ export async function countLmsTable(table: LmsTableName): Promise<number> {
   return count;
 }
 
-export async function queueMutation(item: Omit<LmsOutboxItem, 'status' | 'createdAt'> & { status?: LmsOutboxItem['status'] }): Promise<void> {
-  const db = await openDb();
+export async function queueMutation(
+  item: Omit<LmsOutboxItem, 'status' | 'createdAt'> & { status?: LmsOutboxItem['status'] },
+  email?: string,
+): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('outbox', 'readwrite');
   const row: LmsOutboxItem = {
     id: item.id,
@@ -165,12 +256,18 @@ export async function queueMutation(item: Omit<LmsOutboxItem, 'status' | 'create
   };
   tx.objectStore('outbox').put(row);
   await txDone(tx);
-  const pending = await listOutbox('pending');
-  await setPendingCount(pending.length);
+  const pending = await listOutbox('pending', e);
+  await setPendingCount(pending.length, e);
 }
 
-export async function listOutbox(status?: LmsOutboxItem['status']): Promise<LmsOutboxItem[]> {
-  const db = await openDb();
+export async function listOutbox(
+  status?: LmsOutboxItem['status'],
+  email?: string,
+): Promise<LmsOutboxItem[]> {
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) return [];
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('outbox', 'readonly');
   const rows = await new Promise<LmsOutboxItem[]>((resolve, reject) => {
     const req = tx.objectStore('outbox').getAll();
@@ -181,8 +278,15 @@ export async function listOutbox(status?: LmsOutboxItem['status']): Promise<LmsO
   return status ? rows.filter((row) => row.status === status) : rows;
 }
 
-export async function markOutbox(id: string, status: LmsOutboxItem['status'], detail?: string): Promise<void> {
-  const db = await openDb();
+export async function markOutbox(
+  id: string,
+  status: LmsOutboxItem['status'],
+  detail?: string,
+  email?: string,
+): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('outbox', 'readwrite');
   const store = tx.objectStore('outbox');
   const row = await new Promise<LmsOutboxItem | undefined>((resolve, reject) => {
@@ -196,25 +300,58 @@ export async function markOutbox(id: string, status: LmsOutboxItem['status'], de
     store.put(row);
   }
   await txDone(tx);
-  const pending = await listOutbox('pending');
-  await setPendingCount(pending.length);
+  const pending = await listOutbox('pending', e);
+  await setPendingCount(pending.length, e);
 }
 
-export async function putLocalReceipt(row: Record<string, unknown>): Promise<void> {
-  const db = await openDb();
+export async function putLocalReceipt(row: Record<string, unknown>, email?: string): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('loan_receipts', 'readwrite');
   tx.objectStore('loan_receipts').put(row);
   await txDone(tx);
 }
 
-export async function replaceOutbox(items: LmsOutboxItem[]): Promise<void> {
-  const db = await openDb();
+export async function putLocalRow(
+  table: LmsTableName,
+  row: Record<string, unknown>,
+  email?: string,
+): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
+  const tx = db.transaction(table, 'readwrite');
+  tx.objectStore(table).put(row);
+  await txDone(tx);
+}
+
+export async function deleteLocalRow(
+  table: LmsTableName,
+  id: string | number,
+  email?: string,
+): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
+  const tx = db.transaction(table, 'readwrite');
+  tx.objectStore(table).delete(id);
+  await txDone(tx);
+}
+
+export async function replaceOutbox(items: LmsOutboxItem[], email?: string): Promise<void> {
+  const e = requireEmail(email);
+  setLmsActiveEmail(e);
+  const db = await openDb(e);
   const tx = db.transaction('outbox', 'readwrite');
   const store = tx.objectStore('outbox');
   store.clear();
   for (const item of items) store.put(item);
   await txDone(tx);
-  await setPendingCount(items.filter((item) => item.status === 'pending').length);
+  await setPendingCount(
+    items.filter((item) => item.status === 'pending').length,
+    e,
+  );
 }
 
 export function newClientKey(): string {
@@ -223,8 +360,10 @@ export function newClientKey(): string {
 }
 
 export async function pendingMutationCount(email?: string): Promise<number> {
-  const meta = await loadLmsMeta(email);
+  const e = normalizeEmail(email || activeEmail);
+  if (!e) return 0;
+  const meta = await loadLmsMeta(e);
   if (meta) return meta.pendingMutations || 0;
-  const pending = await listOutbox('pending');
+  const pending = await listOutbox('pending', e);
   return pending.length;
 }

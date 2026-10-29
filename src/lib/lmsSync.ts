@@ -33,8 +33,9 @@ export type LmsCache = {
 
 const LMS_HOSTS = ['https://lms.uwezo.go.ke', 'https://lms-staging.uwezo.go.ke'];
 
+/** Menu groups mirror live side-nav labels (DASHBOARD / GROUPS / LOANS / …). */
 const CONSTITUENCY_SUFFIXES: { id: string; group: string; title: string; suffix: string }[] = [
-  { id: 'dashboard', group: 'Constituency', title: 'Dashboard', suffix: '/dashboard' },
+  { id: 'dashboard', group: 'Dashboard', title: 'Dashboard', suffix: '/dashboard' },
   { id: 'groups', group: 'Groups', title: 'Groups Information', suffix: '/groups' },
   { id: 'group-members', group: 'Groups', title: 'Group Members', suffix: '/groups/members' },
   { id: 'contagious', group: 'Groups', title: 'Contagious Members', suffix: '/groups/multi-group-members' },
@@ -52,10 +53,10 @@ const CONSTITUENCY_SUFFIXES: { id: string; group: string; title: string; suffix:
   { id: 'audit', group: 'Reports', title: 'Audit Trail', suffix: '/reports/audit-trail' },
   { id: 'disbursement', group: 'Reports', title: 'Disbursement Reports', suffix: '/reports/disbursement' },
   { id: 'sector', group: 'Reports', title: 'Sectoral Analysis', suffix: '/reports/dynamic-report?view=sector' },
-  { id: 'users', group: 'County', title: 'Users', suffix: '/../users' },
-  { id: 'add-user', group: 'County', title: 'Add User', suffix: '/../users/add' },
-  { id: 'county-audit', group: 'County', title: 'County Audit Trail', suffix: '/../audit-trail' },
-  { id: 'help', group: 'Help', title: 'Help', suffix: '/help' },
+  { id: 'users', group: 'Users', title: 'View Users', suffix: '/../users' },
+  { id: 'add-user', group: 'Users', title: 'Add User', suffix: '/../users/add' },
+  { id: 'county-audit', group: 'Users', title: 'County Audit Trail', suffix: '/../audit-trail' },
+  { id: 'help', group: 'Help & Support', title: 'Help', suffix: '/help' },
 ];
 
 export function constituencyMenu(basePath: string): LmsPage[] {
@@ -78,31 +79,32 @@ export function constituencyMenu(basePath: string): LmsPage[] {
 export const LMS_PAGES: Record<LmsRole, LmsPage[]> = {
   constituency: constituencyMenu(''),
   headquarters: [
-    { id: 'dashboard', group: 'Headquarters', title: 'HQ Dashboard', path: '/dashboard' },
-    { id: 'applications', group: 'Submissions', title: 'Applications', path: '/hq/applications' },
+    { id: 'dashboard', group: 'HQ Dashboard', title: 'HQ Dashboard', path: '/dashboard' },
+    { id: 'applications', group: 'Submissions', title: 'All Applications', path: '/hq/applications' },
     { id: 'tasks', group: 'Submissions', title: 'Approval Tasks', path: '/hq/applications/approval-tasks' },
-    { id: 'allocations', group: 'Headquarters', title: 'Allocations', path: '/hq/allocations' },
-    { id: 'groups', group: 'Groups', title: 'Groups', path: '/hq/groups/list' },
-    { id: 'group-loans', group: 'Loans', title: 'Group Loans', path: '/hq/loans/group-loans' },
-    { id: 'receipts', group: 'Loans', title: 'Receipts', path: '/hq/loans/receipts' },
+    { id: 'allocations', group: 'Constituency Allocations', title: 'Allocations', path: '/hq/allocations' },
+    { id: 'groups', group: 'Registry', title: 'Beneficiary Groups', path: '/hq/groups/list' },
+    { id: 'group-loans', group: 'Loan Portfolio', title: 'Group Loans', path: '/hq/loans/group-loans' },
+    { id: 'receipts', group: 'Loan Portfolio', title: 'Loan Receipts', path: '/hq/loans/receipts' },
     { id: 'volume', group: 'Reports', title: 'Apps by Constituency', path: '/hq/reports/application-volume' },
-    { id: 'report', group: 'Reports', title: 'Generate Report', path: '/hq/reports' },
-    { id: 'aging', group: 'Headquarters', title: 'Phase Aging', path: '/phase-aging' },
-    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
+    { id: 'report', group: 'Reports', title: 'National Reports', path: '/hq/reports' },
+    { id: 'aging', group: 'Reports', title: 'Phase Aging', path: '/phase-aging' },
+    { id: 'help', group: 'Help & Support', title: 'Help', path: '/help' },
   ],
   secretariat: [
-    { id: 'phases', group: 'Secretariat', title: 'Phases', path: '/secretariat/phases' },
-    { id: 'dashboard', group: 'Secretariat', title: 'National Dashboard', path: '/dashboard?national=1' },
-    { id: 'volume', group: 'Reports', title: 'Application Volume', path: '/secretariat/application-volume' },
-    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
+    { id: 'phases', group: 'Secretariat Dashboard', title: 'Phases for Review', path: '/secretariat/phases' },
+    { id: 'dashboard', group: 'Secretariat Dashboard', title: 'National Analytics', path: '/dashboard?national=1' },
+    { id: 'volume', group: 'Reports', title: 'Apps by Constituency', path: '/secretariat/application-volume' },
+    { id: 'help', group: 'Help & Support', title: 'Help', path: '/help' },
   ],
   accountant: [
+    { id: 'dashboard', group: 'Accounts', title: 'Accounts Dashboard', path: '/accountant/phases' },
     { id: 'phases', group: 'Accounts', title: 'Phases for Payment', path: '/accountant/phases' },
-    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
+    { id: 'help', group: 'Help & Support', title: 'Help', path: '/help' },
   ],
   staff: [
-    { id: 'dashboard', group: 'LMS', title: 'Dashboard', path: '/dashboard' },
-    { id: 'help', group: 'Help', title: 'Help', path: '/help' },
+    { id: 'dashboard', group: 'Dashboard', title: 'Dashboard', path: '/dashboard' },
+    { id: 'help', group: 'Help & Support', title: 'Help', path: '/help' },
   ],
 };
 
@@ -1050,16 +1052,40 @@ export async function openLmsFromZimbra(email: string, token: string): Promise<{
         continue;
       }
       const role = isRole(data.role) ? data.role : 'staff';
-      const saved = await downloadMenu(
-        host,
+      const cookie = sessionCookie(posted.setCookie.split('\n'));
+      // Persist the Laravel session immediately so offline snapshot sync works even if
+      // Livewire HTML menu scrape fails (constituency DB sync does not need page HTML).
+      saveLmsCache({
         email,
         role,
-        typeof data.base === 'string' ? data.base : '',
-        data.constituency || '',
-        sessionCookie(posted.setCookie.split('\n')),
-        'Signed in with the mailbox.',
-      );
-      return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
+        fetchedAt: new Date().toISOString(),
+        detail: 'Signed in with the mailbox.',
+        pages: loadLmsCache(email)?.pages || {},
+        menu: loadLmsCache(email)?.menu || (role === 'constituency' ? constituencyMenu(typeof data.base === 'string' ? data.base : '') : LMS_PAGES[role]),
+        host,
+        cookie,
+      });
+      try {
+        const saved = await downloadMenu(
+          host,
+          email,
+          role,
+          typeof data.base === 'string' ? data.base : '',
+          data.constituency || '',
+          cookie,
+          'Signed in with the mailbox.',
+        );
+        return { authenticated: true, role: saved.role, detail: saved.detail, constituency: saved.constituency };
+      } catch {
+        return {
+          authenticated: Boolean(cookie),
+          role,
+          detail: cookie
+            ? 'Signed in with the mailbox. Session saved for offline sync; open Refresh if menu pages are empty.'
+            : 'Signed in with the mailbox, but the LMS session cookie was not returned.',
+          constituency: data.constituency || '',
+        };
+      }
     }
   } catch {
     last = 'lms.uwezo.go.ke did not answer.';

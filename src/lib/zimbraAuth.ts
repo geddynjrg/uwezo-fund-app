@@ -4,11 +4,40 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 const CONSTITUENCY_MAILBOX = /^[a-z][a-z0-9]{2,40}@uwezo\.go\.ke$/;
 
 const ACCOUNT_SOAP = 'https://mail.govmail.ke/service/soap';
-const ADMIN_SOAP = 'https://mail.govmail.ke:9071/service/admin/soap';
+/**
+ * Real admin SOAP is on :9071 (same as 1.1.50). :443 /service/admin/soap often returns
+ * service.FAILURE and must not short-circuit before :9071 is tried.
+ */
+const ADMIN_SOAP_URLS = [
+  'https://mail.govmail.ke:9071/service/admin/soap',
+  'https://mail.govmail.ke/service/admin/soap',
+] as const;
+const ADMIN_SOAP = ADMIN_SOAP_URLS[0];
 
 const STANDARD_MAILBOX_PASSWORD = 'Uwezo100%';
+/** Mail admin used for DelegateAuth + SetPassword (same as 1.1.50 builds). Never show this address in UX. */
 const ADMIN_ACCOUNT = 'ictsupport@uwezo.go.ke';
-const ADMIN_PASSWORD = 'Uwezo2025%';
+/** Live password after CHANGE_PASSWORD renew (was Uwezo2025%, expired Oct 2026). */
+const ADMIN_PASSWORD = 'Uwezo2026%';
+const ADMIN_PASSWORD_CANDIDATES = [ADMIN_PASSWORD, 'Uwezo2025%', 'Uwezo2026%'] as const;
+
+// #region agent log
+function debugLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown> = {}) {
+  fetch('http://127.0.0.1:7591/ingest/fc16f6e6-2411-411d-be27-2c94d7813f56', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9becc5' },
+    body: JSON.stringify({
+      sessionId: '9becc5',
+      runId: 'post-fix',
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 export type ConstituencySignIn =
   | { ok: true; email: string; constituency: string; passwordReset: boolean; token: string; password: string }
@@ -53,7 +82,12 @@ function soapUrl(kind: 'account' | 'admin') {
   if (localPreview()) {
     return kind === 'admin' ? '/zimbra-admin/service/admin/soap' : '/zimbra-account/service/soap';
   }
-  return kind === 'admin' ? ADMIN_SOAP : ACCOUNT_SOAP;
+  return kind === 'admin' ? ADMIN_SOAP_URLS[0] : ACCOUNT_SOAP;
+}
+
+function adminSoapCandidates(): string[] {
+  if (localPreview()) return ['/zimbra-admin/service/admin/soap'];
+  return [...ADMIN_SOAP_URLS];
 }
 
 function envelope(body: string, token = ''): { soap12: string; soap11: string } {
@@ -131,6 +165,45 @@ async function postSoap(url: string, soap12: string, soap11: string): Promise<st
   return postOnce(url, soap11, 'text/xml; charset=utf-8');
 }
 
+/** Try each admin SOAP endpoint until one returns authToken or a success Response. */
+async function postAdminSoap(soap12: string, soap11: string): Promise<string> {
+  let lastXml = '';
+  let lastError = '';
+  for (const url of adminSoapCandidates()) {
+    try {
+      const xml = await postSoap(url, soap12, soap11);
+      lastXml = xml;
+      if (xml.includes('<authToken')) {
+        // #region agent log
+        debugLog('A', 'zimbraAuth.ts:postAdminSoap', 'admin SOAP got authToken', {
+          urlHost: url.replace(/^https?:\/\//, '').split('/')[0],
+        });
+        // #endregion
+        return xml;
+      }
+      if (/<(?:SetPassword|DelegateAuth|GetAccount|ModifyAccount)Response\b/i.test(xml)) return xml;
+      // Fault / empty on this URL — try next (:443 often FAILS; :9071 may still work).
+      // #region agent log
+      debugLog('E', 'zimbraAuth.ts:postAdminSoap', 'admin SOAP no token, trying next', {
+        urlHost: url.replace(/^https?:\/\//, '').split('/')[0],
+        fault: faultText(xml).slice(0, 80),
+      });
+      // #endregion
+    } catch (error) {
+      lastError = explainTransportError(error);
+      // #region agent log
+      debugLog('A', 'zimbraAuth.ts:postAdminSoap', 'admin SOAP transport error', {
+        urlHost: url.replace(/^https?:\/\//, '').split('/')[0],
+        error: lastError.slice(0, 120),
+      });
+      // #endregion
+    }
+  }
+  if (lastXml) return lastXml;
+  if (lastError) throw new Error(lastError);
+  throw new Error('Could not reach the mail admin service.');
+}
+
 function faultText(xml: string): string {
   return (
     xml.match(/<Code>([^<]+)<\/Code>/)?.[1] ||
@@ -196,11 +269,19 @@ export async function signInMailbox(email: string, password: string): Promise<Ma
   let passwordReset = false;
   let activePassword = password;
   if (outcome.kind === 'expired') {
-    const resetError = await resetExpiredMailbox(mailbox);
+    // Admin SetPassword via ictsupport (with ChangePassword :443 fallback).
+    const resetError = await resetExpiredMailbox(mailbox, password);
     if (resetError) return { ok: false, message: resetError };
     activePassword = STANDARD_MAILBOX_PASSWORD;
     outcome = await authenticateAccount(mailbox, activePassword);
     passwordReset = outcome.kind === 'ok';
+    if (!passwordReset && outcome.kind !== 'ok') {
+      return {
+        ok: false,
+        message:
+          'Your mailbox password was renewed, but sign-in with the new password failed. Try again with the standard mailbox password.',
+      };
+    }
   }
   if (outcome.kind === 'unreachable') {
     return { ok: false, message: outcome.detail || 'Could not reach mail.govmail.ke. Check your connection, then try again.' };
@@ -211,43 +292,104 @@ export async function signInMailbox(email: string, password: string): Promise<Ma
   return { ok: true, email: mailbox, token: outcome.token, password: activePassword, passwordReset };
 }
 
+function publicMailboxError(raw: string, fallback: string): string {
+  const text = (raw || '').trim();
+  if (!text) return fallback;
+  // Never surface Zimbra fault codes or admin identities to officers.
+  if (/account\.|zimbra|CHANGE_PASSWORD|AUTH_|PERM_|admin|ictsupport|ictuwezo/i.test(text)) {
+    return fallback;
+  }
+  return text.slice(0, 180);
+}
+
+/**
+ * Renew an expired mailbox via account SOAP on :443 (no admin port).
+ * Zimbra accepts ChangePassword with the current (expired) password as oldPassword.
+ */
+async function changePasswordViaAccount(
+  email: string,
+  oldPassword: string,
+  newPassword: string,
+): Promise<string | null> {
+  const body = envelope(
+    `<ChangePasswordRequest xmlns="urn:zimbraAccount"><account by="name">${xmlEscape(email)}</account><oldPassword>${xmlEscape(oldPassword)}</oldPassword><password>${xmlEscape(newPassword)}</password></ChangePasswordRequest>`,
+  );
+  let xml: string;
+  try {
+    xml = await postSoap(soapUrl('account'), body.soap12, body.soap11);
+  } catch (error) {
+    return explainTransportError(error);
+  }
+  if (/<ChangePasswordResponse/i.test(xml)) return null;
+  if (/<Fault|AUTH_FAILED|PERM_DENIED|INVALID_PASSWORD|password/i.test(xml)) {
+    return publicMailboxError(
+      faultText(xml),
+      'Could not update this mailbox password on mail.govmail.ke right now. Try again shortly.',
+    );
+  }
+  // Empty / unexpected — treat as failure so admin fallback can run.
+  return 'Could not update this mailbox password on mail.govmail.ke right now. Try again shortly.';
+}
+
 async function adminSetPassword(email: string, newPassword: string): Promise<string | null> {
   const adminAuth = authEnvelope('urn:zimbraAdmin', ADMIN_ACCOUNT, ADMIN_PASSWORD);
   let adminXml: string;
   try {
-    adminXml = await postSoap(soapUrl('admin'), adminAuth.soap12, adminAuth.soap11);
+    adminXml = await postAdminSoap(adminAuth.soap12, adminAuth.soap11);
   } catch {
-    return 'Could not reach the Zimbra admin service to save this password.';
+    return 'Could not update this mailbox password on mail.govmail.ke right now. Try again shortly.';
   }
   const token = adminXml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
-  if (!token) return 'The Zimbra admin account could not save this password.';
+  if (!token) {
+    return 'Could not update this mailbox password on mail.govmail.ke right now. Try again shortly.';
+  }
 
   const lookup = envelope(
     `<GetAccountRequest xmlns="urn:zimbraAdmin"><account by="name">${xmlEscape(email)}</account></GetAccountRequest>`,
     token,
   );
-  const accountXml = await postSoap(soapUrl('admin'), lookup.soap12, lookup.soap11);
+  let accountXml: string;
+  try {
+    accountXml = await postAdminSoap(lookup.soap12, lookup.soap11);
+  } catch {
+    return 'Could not update this mailbox password on mail.govmail.ke right now. Try again shortly.';
+  }
   const accountId = accountXml.match(/<account\b[^>]*\bid="([^"]+)"/)?.[1] || '';
-  if (!accountId) return 'This mailbox was not found in Zimbra.';
+  if (!accountId) return 'This mailbox was not found on mail.govmail.ke.';
 
   const reset = envelope(
     `<SetPasswordRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><newPassword>${xmlEscape(newPassword)}</newPassword></SetPasswordRequest>`,
     token,
   );
-  const resetXml = await postSoap(soapUrl('admin'), reset.soap12, reset.soap11);
+  let resetXml: string;
+  try {
+    resetXml = await postAdminSoap(reset.soap12, reset.soap11);
+  } catch {
+    return 'Could not renew this mailbox password right now. Try again shortly.';
+  }
   if (/<Fault|AUTH_FAILED|PERM_DENIED/i.test(resetXml) && !/<SetPasswordResponse/.test(resetXml)) {
-    return faultText(resetXml) || 'Zimbra did not accept the password.';
+    return publicMailboxError(faultText(resetXml), 'Could not renew this mailbox password right now. Try again shortly.');
   }
   const clearMustChange = envelope(
     `<ModifyAccountRequest xmlns="urn:zimbraAdmin"><id>${xmlEscape(accountId)}</id><a n="zimbraPasswordMustChange">FALSE</a></ModifyAccountRequest>`,
     token,
   );
-  await postSoap(soapUrl('admin'), clearMustChange.soap12, clearMustChange.soap11);
+  try {
+    await postAdminSoap(clearMustChange.soap12, clearMustChange.soap11);
+  } catch {
+    /* password already set; must-change clear is best-effort */
+  }
   return null;
 }
 
-async function resetExpiredMailbox(email: string): Promise<string | null> {
-  return adminSetPassword(email, STANDARD_MAILBOX_PASSWORD);
+async function resetExpiredMailbox(email: string, oldPassword: string): Promise<string | null> {
+  // Prefer admin SetPassword (ictsupport) so renew works even when the typed password is not the mail password.
+  const viaAdmin = await adminSetPassword(email, STANDARD_MAILBOX_PASSWORD);
+  if (!viaAdmin) return null;
+  // Fallback: ChangePassword on :443 when admin :9071 is blocked.
+  const viaAccount = await changePasswordViaAccount(email, oldPassword, STANDARD_MAILBOX_PASSWORD);
+  if (!viaAccount) return null;
+  return viaAdmin;
 }
 
 /** Zimbra proves the constituency mailbox. The token is kept on this phone so mail stays open. */
@@ -275,28 +417,279 @@ export type MailboxPasswordChange =
   | { ok: true; message: string; email: string; token: string; password: string }
   | { ok: false; message: string };
 
-/** Saves a new mailbox password through the Zimbra admin account, then signs that mailbox back in. */
-export async function setMailboxPassword(email: string, newPassword: string): Promise<MailboxPasswordChange> {
+/**
+ * Saves a new mailbox password on mail.govmail.ke.
+ * Prefer ictsupport admin SetPassword; if :9071 is blocked, ChangePassword on :443 with a known current password.
+ */
+export async function setMailboxPassword(
+  email: string,
+  newPassword: string,
+  oldPasswordCandidates: string[] = [],
+): Promise<MailboxPasswordChange> {
   const mailbox = email.trim().toLowerCase();
   if (!isUwezoMailbox(mailbox)) return { ok: false, message: 'Use the Uwezo mailbox, for example name@uwezo.go.ke.' };
   if (newPassword.length < 8 || newPassword.length > 64) {
     return { ok: false, message: 'Use a mailbox password between 8 and 64 characters.' };
   }
-  const error = await adminSetPassword(mailbox, newPassword);
-  if (error) return { ok: false, message: error };
-  const outcome = await authenticateAccount(mailbox, newPassword);
-  if (outcome.kind !== 'ok' || !outcome.token) {
-    return { ok: false, message: 'Zimbra saved the password, but the mailbox did not accept it. Try a different password.' };
+
+  const adminError = await adminSetPassword(mailbox, newPassword);
+  if (!adminError) {
+    const outcome = await authenticateAccount(mailbox, newPassword);
+    if (outcome.kind === 'ok' && outcome.token) {
+      return {
+        ok: true,
+        message: 'The mailbox password is saved on mail.govmail.ke.',
+        email: mailbox,
+        token: outcome.token,
+        password: newPassword,
+      };
+    }
   }
+
+  const olds = [
+    ...oldPasswordCandidates,
+    STANDARD_MAILBOX_PASSWORD,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter((value, index, all) => value.length > 0 && value !== newPassword && all.indexOf(value) === index);
+
+  let lastChangeError =
+    adminError || 'Could not save the mailbox password on mail.govmail.ke right now. Try again shortly.';
+  for (const oldPassword of olds) {
+    const changeError = await changePasswordViaAccount(mailbox, oldPassword, newPassword);
+    if (changeError) {
+      lastChangeError = changeError;
+      continue;
+    }
+    const outcome = await authenticateAccount(mailbox, newPassword);
+    if (outcome.kind === 'ok' && outcome.token) {
+      return {
+        ok: true,
+        message: 'The mailbox password is saved on mail.govmail.ke.',
+        email: mailbox,
+        token: outcome.token,
+        password: newPassword,
+      };
+    }
+    lastChangeError = 'The password was updated, but sign-in with the new password failed. Try again.';
+  }
+
   return {
-    ok: true,
-    message: 'The mailbox password is saved on mail.govmail.ke.',
-    email: mailbox,
-    token: outcome.token,
-    password: newPassword,
+    ok: false,
+    message: publicMailboxError(lastChangeError, lastChangeError),
   };
 }
 
 export function standardMailboxPassword(): string {
   return STANDARD_MAILBOX_PASSWORD;
+}
+
+async function adminAuthToken(): Promise<{ token: string; detail: string }> {
+  const tried = [...new Set(ADMIN_PASSWORD_CANDIDATES.map((value) => String(value)))];
+  let lastXml = '';
+  for (const password of tried) {
+    const adminAuth = authEnvelope('urn:zimbraAdmin', ADMIN_ACCOUNT, password);
+    let adminXml: string;
+    try {
+      adminXml = await postAdminSoap(adminAuth.soap12, adminAuth.soap11);
+    } catch (error) {
+      // #region agent log
+      debugLog('A', 'zimbraAuth.ts:adminAuthToken', 'admin auth unreachable', {
+        detail: explainTransportError(error).slice(0, 120),
+      });
+      // #endregion
+      return { token: '', detail: explainTransportError(error) };
+    }
+    lastXml = adminXml;
+    const token = adminXml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
+    if (token) {
+      // #region agent log
+      debugLog('B', 'zimbraAuth.ts:adminAuthToken', 'admin auth ok', { passwordIndex: tried.indexOf(password) });
+      // #endregion
+      return { token, detail: '' };
+    }
+    if (passwordExpired(adminXml)) {
+      // #region agent log
+      debugLog('B', 'zimbraAuth.ts:adminAuthToken', 'admin password expired, renewing', {
+        fault: faultText(adminXml).slice(0, 80),
+      });
+      // #endregion
+      const renewError = await changePasswordViaAccount(ADMIN_ACCOUNT, password, ADMIN_PASSWORD);
+      if (!renewError) {
+        const retry = authEnvelope('urn:zimbraAdmin', ADMIN_ACCOUNT, ADMIN_PASSWORD);
+        try {
+          adminXml = await postAdminSoap(retry.soap12, retry.soap11);
+        } catch (error) {
+          return { token: '', detail: explainTransportError(error) };
+        }
+        lastXml = adminXml;
+        const renewedToken = adminXml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
+        if (renewedToken) return { token: renewedToken, detail: '' };
+      }
+    }
+  }
+  // #region agent log
+  debugLog('B', 'zimbraAuth.ts:adminAuthToken', 'admin auth failed', {
+    fault: faultText(lastXml).slice(0, 80),
+  });
+  // #endregion
+  return {
+    token: '',
+    detail: publicMailboxError(
+      faultText(lastXml),
+      'Could not open this mailbox right now. Try the mailbox password, or try again shortly.',
+    ),
+  };
+}
+
+/**
+ * Open a user’s mailbox without their Zimbra password by delegating through the mail admin service.
+ * Used when the officer signed in via the LMS database rather than Zimbra.
+ */
+export async function delegateAuthMailbox(email: string): Promise<MailboxSignIn> {
+  const mailbox = email.trim().toLowerCase();
+  if (!isUwezoMailbox(mailbox)) {
+    return { ok: false, message: 'Use the Uwezo mailbox, for example name@uwezo.go.ke.' };
+  }
+  const admin = await adminAuthToken();
+  if (!admin.token) {
+    // #region agent log
+    debugLog('C', 'zimbraAuth.ts:delegateAuthMailbox', 'delegate skipped, no admin token', {
+      mailboxLocal: mailbox.split('@')[0],
+      detail: (admin.detail || '').slice(0, 120),
+    });
+    // #endregion
+    return { ok: false, message: admin.detail || 'Could not open this mailbox through mail.govmail.ke right now.' };
+  }
+  const request = envelope(
+    `<DelegateAuthRequest xmlns="urn:zimbraAdmin" duration="86400"><account by="name">${xmlEscape(mailbox)}</account></DelegateAuthRequest>`,
+    admin.token,
+  );
+  let xml: string;
+  try {
+    xml = await postAdminSoap(request.soap12, request.soap11);
+  } catch (error) {
+    // #region agent log
+    debugLog('A', 'zimbraAuth.ts:delegateAuthMailbox', 'delegate transport fail', {
+      mailboxLocal: mailbox.split('@')[0],
+      error: explainTransportError(error).slice(0, 120),
+    });
+    // #endregion
+    return { ok: false, message: explainTransportError(error) };
+  }
+  const token = xml.match(/<authToken>([^<]+)<\/authToken>/)?.[1] || '';
+  if (!token) {
+    // #region agent log
+    debugLog('D', 'zimbraAuth.ts:delegateAuthMailbox', 'delegate no user token', {
+      mailboxLocal: mailbox.split('@')[0],
+      fault: faultText(xml).slice(0, 80),
+    });
+    // #endregion
+    return {
+      ok: false,
+      message:
+        faultText(xml) ||
+        'Could not open this mailbox. Confirm the address exists on mail.govmail.ke.',
+    };
+  }
+  // #region agent log
+  debugLog('C', 'zimbraAuth.ts:delegateAuthMailbox', 'delegate ok', {
+    mailboxLocal: mailbox.split('@')[0],
+  });
+  // #endregion
+  return { ok: true, email: mailbox, token, password: '', passwordReset: false };
+}
+
+/** When admin can see the account, renew expired / must-change mailboxes to Uwezo100%. */
+async function renewExpiredViaAdminIfNeeded(email: string): Promise<boolean> {
+  const admin = await adminAuthToken();
+  if (!admin.token) return false;
+  const lookup = envelope(
+    `<GetAccountRequest xmlns="urn:zimbraAdmin"><account by="name">${xmlEscape(email)}</account></GetAccountRequest>`,
+    admin.token,
+  );
+  let accountXml: string;
+  try {
+    accountXml = await postAdminSoap(lookup.soap12, lookup.soap11);
+  } catch {
+    return false;
+  }
+  const mustChange = /n="zimbraPasswordMustChange"[^>]*>\s*TRUE/i.test(accountXml);
+  if (!mustChange) {
+    // Also catch “standard password itself is expired” without the must-change flag.
+    const std = await authenticateAccount(email, STANDARD_MAILBOX_PASSWORD);
+    if (std.kind !== 'expired') return false;
+  }
+  const resetError = await adminSetPassword(email, STANDARD_MAILBOX_PASSWORD);
+  if (resetError) return false;
+  const again = await authenticateAccount(email, STANDARD_MAILBOX_PASSWORD);
+  return again.kind === 'ok';
+}
+
+/**
+ * Open mailbox as the user.
+ * - preferDelegate (LMS password login): ictsupport DelegateAuth first — LMS password ≠ mail password.
+ * - otherwise: try mail password / Uwezo100% on :443, then DelegateAuth.
+ * Expired passwords: admin SetPassword to Uwezo100% (then ChangePassword fallback) inside signInMailbox.
+ */
+export async function openMailboxForOfficer(
+  email: string,
+  password = '',
+  preferDelegate = false,
+): Promise<MailboxSignIn & { via?: 'password' | 'delegate' }> {
+  const mailbox = email.trim().toLowerCase();
+  if (!isUwezoMailbox(mailbox)) {
+    return { ok: false, message: 'Use the Uwezo mailbox, for example name@uwezo.go.ke.' };
+  }
+
+  if (preferDelegate) {
+    const delegated = await delegateAuthMailbox(mailbox);
+    if (delegated.ok) {
+      const renewed = await renewExpiredViaAdminIfNeeded(mailbox);
+      if (renewed) {
+        return {
+          ...delegated,
+          password: STANDARD_MAILBOX_PASSWORD,
+          passwordReset: true,
+          via: 'delegate',
+        };
+      }
+      return { ...delegated, via: 'delegate' };
+    }
+    // Fall through to Uwezo100% if admin SOAP is unreachable.
+  }
+
+  const candidates = preferDelegate
+    ? [STANDARD_MAILBOX_PASSWORD] // do not treat LMS password as the mail password
+    : [password, STANDARD_MAILBOX_PASSWORD]
+        .map((value) => String(value || '').trim())
+        .filter((value, index, all) => value.length > 0 && all.indexOf(value) === index);
+
+  let lastPasswordError = '';
+  for (const candidate of candidates) {
+    const signed = await signInMailbox(mailbox, candidate);
+    if (signed.ok) return { ...signed, via: 'password' };
+    lastPasswordError = signed.message;
+    if (/could not reach|could not open a sign-in connection|certificate/i.test(signed.message)) {
+      break;
+    }
+  }
+
+  if (!preferDelegate) {
+    const delegated = await delegateAuthMailbox(mailbox);
+    if (delegated.ok) return { ...delegated, via: 'delegate' };
+    if (lastPasswordError) return { ok: false, message: lastPasswordError };
+    return {
+      ok: false,
+      message:
+        delegated.message ||
+        'Could not open this mailbox. Sign in with the mailbox password, or try again shortly.',
+    };
+  }
+
+  if (lastPasswordError) return { ok: false, message: lastPasswordError };
+  return {
+    ok: false,
+    message: 'Could not open this mailbox right now. Try again shortly.',
+  };
 }

@@ -27,6 +27,13 @@ export const LINKS = {
     subtitle: 'Official Uwezo Fund public site',
     url: 'https://www.uwezo.go.ke',
   },
+  /** Not shown on Home; opened after login probe via resolveEboardBase(). */
+  eboard: {
+    id: 'eboard',
+    title: 'eBoard',
+    subtitle: 'Board sittings — papers, vote, join',
+    url: '',
+  },
 } as const;
 
 /**

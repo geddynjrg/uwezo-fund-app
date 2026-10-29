@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
+import { openEboardFromDeepLink } from '../lib/eboard';
 import { INBOX_UPDATED_EVENT } from '../lib/inboxSync';
 import { copyOtpText, extractOtpCode } from '../lib/native';
 import { getActiveSession, loadInbox, markInboxRead, type AppNotification } from '../lib/session';
@@ -34,7 +35,7 @@ export function Notifications({ onBack }: NotificationsProps) {
         <img src={logo} alt="" className="chat-header__logo" width={36} height={36} />
         <div className="chat-header__text">
           <strong>Notifications</strong>
-          <span>OTP · loan status</span>
+          <span>OTP · loan status · eBoard</span>
         </div>
       </header>
       <div className="chat-thread">
@@ -55,6 +56,10 @@ export function Notifications({ onBack }: NotificationsProps) {
                   onClick={() => {
                     markInboxRead(n.id);
                     setItems(loadInbox());
+                    const deep = n.meta?.deep_link || n.meta?.join_link || '';
+                    if (deep.startsWith('uwezo://eboard')) {
+                      void openEboardFromDeepLink(deep);
+                    }
                   }}
                 >
                   <strong>{n.title}</strong>
@@ -63,6 +68,7 @@ export function Notifications({ onBack }: NotificationsProps) {
                   {'\n'}
                   <span className="notif-meta">
                     {n.kind} · {new Date(n.createdAt).toLocaleString()}
+                    {n.meta?.source === 'eboard' ? ' · tap to open eBoard' : ''}
                   </span>
                 </button>
                 {code ? (

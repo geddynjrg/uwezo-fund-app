@@ -57,6 +57,7 @@ const secretariatLoaders: Record<string, LmsPageLoader> = {
 };
 
 const accountantLoaders: Record<string, LmsPageLoader> = {
+  dashboard: () => import('./pages/accountant/Pages').then((m) => ({ default: m.AccountantHome })),
   phases: () => import('./pages/accountant/Pages').then((m) => ({ default: m.AccountantPhases })),
   help: () => import('./pages/shared/Help'),
 };

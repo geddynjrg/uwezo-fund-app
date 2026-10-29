@@ -15,6 +15,8 @@ export type AppSession = {
   loansAccessToken?: string;
   loansRefreshToken?: string;
   portals?: string[];
+  /** Typed password was accepted by eBoard during this app session. */
+  eboardVerified?: boolean;
 };
 
 export type AppNotification = {

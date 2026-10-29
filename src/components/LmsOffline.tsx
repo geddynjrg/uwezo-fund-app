@@ -66,7 +66,7 @@ export function LmsOffline({
     const nextMeta = await loadLmsMeta(email);
     setMeta(nextMeta);
     onPendingChange?.(nextMeta?.pendingMutations || 0);
-    setRows(await listLmsTable(selected, 150));
+    setRows(await listLmsTable(selected, 150, email));
   }
 
   useEffect(() => {

@@ -26,6 +26,7 @@ function ingest(
     body: string;
     kind: AppNotification['kind'];
     createdAt: string;
+    meta?: Record<string, string>;
   }>,
   alert: boolean,
 ) {
@@ -43,14 +44,15 @@ function ingest(
       body: item.body,
       kind: item.kind,
       createdAt: item.createdAt,
-      meta: { id: item.id },
+      meta: { id: item.id, ...(item.meta || {}) },
     });
     for (const key of keys) {
       if (!seen.has(key)) newKeys.push(key);
       seen.add(key);
     }
     if (already || !created) continue;
-    if (alert && (item.kind === 'otp' || item.kind === 'loan_status')) {
+    const eboardNotice = item.meta?.source === 'eboard' || Boolean(item.meta?.deep_link);
+    if (alert && (item.kind === 'otp' || item.kind === 'loan_status' || eboardNotice)) {
       fresh.push(notice);
     }
   }

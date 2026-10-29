@@ -5,7 +5,6 @@ import { MailBox } from './MailBox';
 import { LmsReactHost } from '../lms/LmsReactHost';
 import { menuForRole } from '../lms/registry';
 import {
-  cacheHasFigures,
   loadLmsCache,
   openLmsFromZimbra,
   roleLabel,
@@ -14,7 +13,7 @@ import {
 } from '../lib/lmsSync';
 import { openLmsDatabase, lmsDbVaultStatus } from '../lib/lmsDbVault';
 import { compareAndSendOfflineChanges, refreshLmsConnection, syncLmsLocal } from '../lib/lmsOfflineSync';
-import { loadLmsMeta, pendingMutationCount } from '../lib/lmsLocalDb';
+import { ensureLmsWorkingCopyFor, loadLmsMeta, pendingMutationCount } from '../lib/lmsLocalDb';
 import { hideLmsEmbed } from '../lib/native';
 import { probeOrigin } from '../lib/portalStatus';
 import { loadStaffSession, saveStaffSession } from '../lib/staffSession';
@@ -26,6 +25,7 @@ type LmsOfficer = {
   passwordReset: boolean;
   role: LmsRole;
   syncDetail: string;
+  mailOnly?: boolean;
 };
 
 type LmsMobileProps = {
@@ -35,21 +35,25 @@ type LmsMobileProps = {
 };
 
 export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
+  const mailOnly = Boolean(officer.mailOnly || loadStaffSession()?.mailOnly);
   const [revision, setRevision] = useState(0);
   const cache = loadLmsCache(officer.email);
   const role = (cache?.role || officer.role) as LmsRole;
-  const pages = menuForRole(officer.email, role);
+  const pages = mailOnly ? [] : menuForRole(officer.email, role);
   const [page, setPage] = useState(pages[0]?.id || 'dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [section, setSection] = useState<'pages' | 'mail' | 'password' | 'database'>('pages');
+  const [section, setSection] = useState<'pages' | 'mail' | 'password' | 'database'>(
+    mailOnly ? 'mail' : 'pages',
+  );
   const [mailRevision, setMailRevision] = useState(0);
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [lmsOnline, setLmsOnline] = useState<boolean | null>(null);
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState(mailOnly ? officer.syncDetail || '' : '');
   const [hasLocalDb, setHasLocalDb] = useState(Boolean(lmsDbVaultStatus(officer.email)));
+  const [constituencyLabel, setConstituencyLabel] = useState(officer.constituency);
   const bootDone = useRef('');
 
   useEffect(() => {
@@ -66,40 +70,72 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
     }
   }, [pages, page]);
 
+  async function applyConstituencyName(metaName?: string) {
+    const name = String(metaName || '').trim();
+    if (!name) return;
+    setConstituencyLabel(name);
+    const staff = loadStaffSession();
+    if (staff && staff.email === officer.email && staff.constituency !== name) {
+      saveStaffSession({ ...staff, constituency: name });
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       if (bootDone.current === officer.email) return;
       bootDone.current = officer.email;
+      if (mailOnly) {
+        setSection('mail');
+        setNotice(
+          officer.syncDetail ||
+            'This mailbox is not an LMS user. Mail is available; the loan management system is not.',
+        );
+        setLmsOnline(false);
+        return;
+      }
+      await ensureLmsWorkingCopyFor(officer.email);
       const staff = loadStaffSession();
       if (staff?.password && lmsDbVaultStatus(officer.email)) {
         await openLmsDatabase(officer.email, staff.password);
       }
       let count = await pendingMutationCount(officer.email);
       if (!cancelled) setPending(count);
-      const meta = await loadLmsMeta(officer.email);
-      if (!cancelled) setHasLocalDb(Boolean(meta || lmsDbVaultStatus(officer.email)));
+      let meta = await loadLmsMeta(officer.email);
+      if (!cancelled) {
+        setHasLocalDb(Boolean(meta || lmsDbVaultStatus(officer.email)));
+        if (meta?.constituencyName) void applyConstituencyName(meta.constituencyName);
+      }
 
       const online = await probeOrigin('https://lms.uwezo.go.ke');
       if (cancelled) return;
       setLmsOnline(online);
 
       if (online) {
-        if (!cacheHasFigures(cache) || !cache?.cookie) {
-          setNotice('Signing in to LMS…');
-          await refreshSessionQuiet();
-        }
+        // Host reachable ≠ authenticated. Always refresh the LMS session when online so
+        // /app/mobile/snapshot can run (cookie + constituency), then sync local DB.
+        setNotice('Signing in to LMS…');
+        await refreshSessionQuiet();
         setNotice('Syncing encrypted LMS data…');
-        const synced = await syncLmsLocal(officer.email);
+        let synced = await syncLmsLocal(officer.email);
+        if (!synced.ok && /session|Sign in|cookie|expired|403|401/i.test(synced.detail || '')) {
+          setNotice('Refreshing LMS session, then syncing again…');
+          await refreshSessionQuiet();
+          synced = await syncLmsLocal(officer.email);
+        }
         if (cancelled) return;
         setNotice(synced.detail);
         count = await pendingMutationCount(officer.email);
         setPending(count);
-        setHasLocalDb(Boolean(lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))));
+        meta = synced.meta || (await loadLmsMeta(officer.email));
+        setHasLocalDb(Boolean(lmsDbVaultStatus(officer.email) || meta));
+        if (meta?.constituencyName) void applyConstituencyName(meta.constituencyName);
         setRevision((value) => value + 1);
       } else if (lmsDbVaultStatus(officer.email) || (await loadLmsMeta(officer.email))) {
         setNotice('');
         setHasLocalDb(true);
+        meta = await loadLmsMeta(officer.email);
+        if (meta?.constituencyName) void applyConstituencyName(meta.constituencyName);
       } else {
         setNotice('Offline — sync once online to download encrypted LMS data.');
       }
@@ -108,7 +144,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [officer.email]);
+  }, [officer.email, mailOnly]);
 
   async function refreshSessionQuiet() {
     const staff = loadStaffSession();
@@ -155,7 +191,12 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       return;
     }
     setBusy(true);
-    const result = await setMailboxPassword(officer.email, nextPassword);
+    const staffForPwd = loadStaffSession();
+    const result = await setMailboxPassword(officer.email, nextPassword, [
+      staffForPwd?.mail?.password || '',
+      staffForPwd?.password || '',
+      standardMailboxPassword(),
+    ]);
     setBusy(false);
     if (!result.ok) {
       setNotice(result.message);
@@ -183,16 +224,17 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
   }
 
   const reset = officer.passwordReset || loadStaffSession()?.passwordReset;
-  const showCompare = lmsOnline === true && pending > 0;
-  const statusLine =
-    notice
-    || (lmsOnline === null
-      ? 'Checking LMS…'
-      : lmsOnline
-        ? `React LMS${pending ? ` · ${pending} to send` : ''}${role === 'constituency' && !hasLocalDb ? ' · sync needed' : ''}`
-        : hasLocalDb
-          ? 'React LMS (offline)'
-          : 'Offline — sync once online');
+  const showCompare = !mailOnly && lmsOnline === true && pending > 0;
+  const statusLine = mailOnly
+    ? notice || 'Mail only — not an LMS user'
+    : notice ||
+      (lmsOnline === null
+        ? 'Checking LMS…'
+        : lmsOnline
+          ? `React LMS${pending ? ` · ${pending} to send` : ''}${role === 'constituency' && !hasLocalDb ? ' · sync needed' : ''}`
+          : hasLocalDb
+            ? 'React LMS (offline)'
+            : 'Offline — sync once online');
 
   return (
     <main className="lms-app lms-app--react">
@@ -202,12 +244,18 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
         </button>
         <img src={logo} alt="" width={32} height={32} />
         <div className="lms-bar__text">
-          <strong>Uwezo Fund LMS</strong>
-          <span>{officer.constituency || roleLabel(role)}</span>
+          <strong>{mailOnly ? 'Uwezo Mail' : 'Uwezo Fund LMS'}</strong>
+          <span>
+            {mailOnly
+              ? officer.email
+              : constituencyLabel || officer.constituency || roleLabel(role)}
+          </span>
         </div>
-        <button type="button" className="lms-menu-btn" disabled={busy} onClick={() => void refresh()}>
-          Refresh
-        </button>
+        {!mailOnly ? (
+          <button type="button" className="lms-menu-btn" disabled={busy} onClick={() => void refresh()}>
+            Refresh
+          </button>
+        ) : null}
         <button type="button" className="lms-menu-btn" onClick={() => leavePages('mail')}>
           Mail
         </button>
@@ -217,38 +265,72 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
       </header>
 
       {menuOpen ? (
-        <nav className="lms-drawer" aria-label="LMS menu">
-          {pages.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={item.id === page && section === 'pages' ? 'lms-link lms-link--on' : 'lms-link'}
-              onClick={() => {
-                setPage(item.id);
-                setSection('pages');
-                setMenuOpen(false);
-              }}
-            >
-              <small>{item.group}</small>
-              {item.title}
-            </button>
-          ))}
-          <button type="button" className="lms-link" onClick={() => leavePages('database')}>
-            <small>Offline</small>
-            Encrypted database
-          </button>
+        <nav
+          className={`lms-drawer${
+            role === 'headquarters'
+              ? ' lms-drawer--hq'
+              : role === 'secretariat'
+                ? ' lms-drawer--secretariat'
+                : role === 'accountant'
+                  ? ' lms-drawer--accountant'
+                  : ''
+          }`}
+          aria-label="LMS menu"
+        >
+          <div className="lms-drawer__brand">
+            <img src={logo} alt="" width={28} height={28} />
+            <strong>UWEZO FUND LMS</strong>
+          </div>
+          {!mailOnly
+            ? (() => {
+                const groups: { group: string; items: typeof pages }[] = [];
+                for (const item of pages) {
+                  const last = groups[groups.length - 1];
+                  if (!last || last.group !== item.group) groups.push({ group: item.group, items: [item] });
+                  else last.items.push(item);
+                }
+                return groups.map((block) => (
+                  <div key={block.group} style={{ display: 'contents' }}>
+                    <div className="lms-drawer__section">{block.group}</div>
+                    {block.items.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={item.id === page && section === 'pages' ? 'lms-link lms-link--on' : 'lms-link'}
+                        onClick={() => {
+                          setPage(item.id);
+                          setSection('pages');
+                          setMenuOpen(false);
+                        }}
+                      >
+                        {item.title}
+                      </button>
+                    ))}
+                  </div>
+                ));
+              })()
+            : null}
+          {!mailOnly ? (
+            <>
+              <div className="lms-drawer__section">Offline</div>
+              <button type="button" className="lms-link" onClick={() => leavePages('database')}>
+                Encrypted database
+              </button>
+            </>
+          ) : (
+            <div className="lms-drawer__section">Mail only</div>
+          )}
+          <div className="lms-drawer__section">Mailbox</div>
           <button type="button" className="lms-link" onClick={() => leavePages('mail')}>
-            <small>Mailbox</small>
             Mail
           </button>
           {isUwezoMailbox(officer.email) ? (
             <button type="button" className="lms-link" onClick={() => leavePages('password')}>
-              <small>Mailbox</small>
               Change email password
             </button>
           ) : null}
+          <div className="lms-drawer__section">Account</div>
           <button type="button" className="lms-link" onClick={onLogout}>
-            <small>Account</small>
             Log out
           </button>
         </nav>
@@ -256,7 +338,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
 
       {reset ? (
         <p className="lms-note lms-note--bar">
-          The mailbox password had expired. It is now {standardMailboxPassword()}. Use that password the next time a sign-in is required.
+          Your mailbox password had expired and was reset to {standardMailboxPassword()}. Use that password the next time a mailbox sign-in is required.
         </p>
       ) : null}
 
@@ -293,6 +375,11 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save password'}</button>
           </form>
         </section>
+      ) : mailOnly ? (
+        <section className="lms-body">
+          <p className="lms-note">{statusLine}</p>
+          <MailBox key={mailRevision} onPasswordReset={setNotice} />
+        </section>
       ) : (
         <div className="lms-react">
           <div className="lms-react__toolbar">
@@ -312,7 +399,7 @@ export function LmsMobile({ officer, onBack, onLogout }: LmsMobileProps) {
             pageId={page}
             email={officer.email}
             role={role}
-            constituency={officer.constituency}
+            constituency={constituencyLabel || officer.constituency}
             online={lmsOnline}
             busy={busy}
             setBusy={setBusy}

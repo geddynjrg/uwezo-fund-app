@@ -1,4 +1,5 @@
 import { OTP_API_BASE, LINKS } from '../config';
+import { probeEboardLogin } from './eboard';
 
 export type AuthOrigin =
   | 'https://majuu.uwezo.go.ke'
@@ -135,6 +136,77 @@ export async function appUnifiedLogin(input: {
   });
 }
 
+export type ApplicantPortalProbe = {
+  majuu: boolean;
+  loans: boolean;
+  eboard: boolean;
+  majuuAccessToken: string;
+  majuuRefreshToken: string;
+  loansAccessToken: string;
+  loansRefreshToken: string;
+};
+
+/**
+ * Login-only probe for Majuu + Loans + eBoard. Never creates applicant accounts.
+ * Used when an @uwezo.go.ke officer may also hold citizen portal / eBoard credentials.
+ */
+export async function appLoginProbe(input: {
+  email: string;
+  password: string;
+  phone?: string;
+}): Promise<ApplicantPortalProbe> {
+  const email = normalizeEmail(input.email);
+  const phone = (input.phone || '').trim();
+  const empty: ApplicantPortalProbe = {
+    majuu: false,
+    loans: false,
+    eboard: false,
+    majuuAccessToken: '',
+    majuuRefreshToken: '',
+    loansAccessToken: '',
+    loansRefreshToken: '',
+  };
+
+  async function tryPortal(origin: AuthOrigin): Promise<{ accessToken: string; refreshToken: string } | null> {
+    try {
+      const data = await postJson(origin, '/api/auth/app/account', {
+        action: 'login_or_register',
+        email,
+        password: input.password,
+        phone,
+        createIfMissing: false,
+      });
+      if (data.created) {
+        // Safety: never accept a freshly created domain applicant account.
+        return null;
+      }
+      const accessToken = String(data.accessToken || data.access_token || '');
+      const refreshToken = String(data.refreshToken || data.refresh_token || '');
+      if (!accessToken) return null;
+      return { accessToken, refreshToken };
+    } catch {
+      return null;
+    }
+  }
+
+  const [majuu, loans, eboardOk] = await Promise.all([
+    tryPortal('https://majuu.uwezo.go.ke'),
+    tryPortal('https://loans.uwezo.go.ke'),
+    probeEboardLogin(email, input.password).catch(() => false),
+  ]);
+
+  return {
+    ...empty,
+    majuu: Boolean(majuu),
+    loans: Boolean(loans),
+    eboard: eboardOk,
+    majuuAccessToken: majuu?.accessToken || '',
+    majuuRefreshToken: majuu?.refreshToken || '',
+    loansAccessToken: loans?.accessToken || '',
+    loansRefreshToken: loans?.refreshToken || '',
+  };
+}
+
 export async function appLoginOrRegister(input: {
   origin: string;
   email: string;
@@ -210,13 +282,23 @@ export async function registerPushDevice(input: {
   email?: string;
   phone?: string;
 }) {
-  return postJson(input.origin, '/api/auth/app/device', {
+  const payload = {
     deviceToken: input.deviceToken,
     platform: input.platform || 'android',
     accessToken: input.accessToken,
     email: input.email,
     phone: input.phone,
-  });
+  };
+  const primary = await postJson(input.origin, '/api/auth/app/device', payload);
+  // Also register on Majuu eBoard device endpoint when this origin is Majuu.
+  if (canonicalAuthOrigin(input.origin) === 'https://majuu.uwezo.go.ke') {
+    try {
+      await postJson('https://majuu.uwezo.go.ke', '/api/eboard/devices', payload);
+    } catch {
+      // optional until portal deploy finishes
+    }
+  }
+  return primary;
 }
 
 export async function refreshAppSession(input: {
@@ -259,6 +341,7 @@ export async function fetchInbox(input: {
         body: string;
         kind: 'otp' | 'loan_status' | 'system';
         createdAt: string;
+        meta?: Record<string, string>;
       }>;
     };
     return Array.isArray(data.items) ? data.items : [];

@@ -24,6 +24,8 @@ import { flushMajuuNotices, flushMajuuUploads } from './lib/majuuApply';
 import { syncPending } from './lib/offlineApply';
 import { replayPendingLogin } from './lib/pendingLogin';
 import { ensureNotifyPermission } from './lib/notify';
+import { openEboardFromDeepLink } from './lib/eboard';
+import { resolveDevicePushToken } from './lib/pushRegister';
 import { probePortals, type PortalAvailability, type PortalId } from './lib/portalStatus';
 import {
   copyOtpText,
@@ -39,6 +41,7 @@ type LmsOfficer = {
   passwordReset: boolean;
   role: LmsRole;
   syncDetail: string;
+  mailOnly?: boolean;
 };
 
 function officerFrom(staff: StaffSession): LmsOfficer {
@@ -48,6 +51,7 @@ function officerFrom(staff: StaffSession): LmsOfficer {
     passwordReset: staff.passwordReset,
     role: staff.role,
     syncDetail: staff.syncDetail,
+    mailOnly: Boolean(staff.mailOnly),
   };
 }
 
@@ -101,32 +105,31 @@ function App() {
     void ensureFreshSession().then((next) => {
       if (next && next.accessToken !== session.accessToken) setSession(next);
     });
-    const deviceToken =
-      localStorage.getItem('uwezo.fund.deviceToken') || `local-${newId()}`;
-    localStorage.setItem('uwezo.fund.deviceToken', deviceToken);
-    const origins = Array.from(
-      new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
-    );
-    for (const origin of origins) {
-      const accessToken = origin.includes('majuu')
-        ? session.majuuAccessToken ||
-          (session.origin.includes('majuu') ? session.accessToken : '')
-        : origin.includes('staging')
-          ? ''
-          : session.loansAccessToken ||
-            (session.origin.includes('loans') ? session.accessToken : '');
-      if (!accessToken) continue;
-      void registerPushDevice({
-        origin,
-        accessToken,
-        deviceToken,
-        platform: 'android',
-        email: session.email,
-        phone: session.phone,
-      }).catch(() => {
-        // optional
-      });
-    }
+    void resolveDevicePushToken().then((deviceToken) => {
+      const origins = Array.from(
+        new Set([canonicalAuthOrigin(session.origin), ...INBOX_ORIGINS]),
+      );
+      for (const origin of origins) {
+        const accessToken = origin.includes('majuu')
+          ? session.majuuAccessToken ||
+            (session.origin.includes('majuu') ? session.accessToken : '')
+          : origin.includes('staging')
+            ? ''
+            : session.loansAccessToken ||
+              (session.origin.includes('loans') ? session.accessToken : '');
+        if (!accessToken) continue;
+        void registerPushDevice({
+          origin,
+          accessToken,
+          deviceToken,
+          platform: 'android',
+          email: session.email,
+          phone: session.phone,
+        }).catch(() => {
+          // optional
+        });
+      }
+    });
     void startOtpListener(session).catch(() => {
       // native listener is optional on web
     });
@@ -190,6 +193,37 @@ function App() {
     };
   }, [screen]);
 
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    async function handleUrl(url: string) {
+      if (!url || !url.startsWith('uwezo://eboard')) return;
+      const result = await openEboardFromDeepLink(url);
+      if (!result.ok) {
+        setToast({
+          id: newId(),
+          title: 'eBoard',
+          body: result.message,
+          kind: 'system',
+          createdAt: new Date().toISOString(),
+          read: false,
+        });
+      }
+    }
+
+    void CapApp.getLaunchUrl().then((launch) => {
+      if (launch?.url) void handleUrl(launch.url);
+    });
+
+    const sub = CapApp.addListener('appUrlOpen', ({ url }) => {
+      void handleUrl(url);
+    });
+
+    return () => {
+      void sub.then((h) => h.remove());
+    };
+  }, []);
+
   const toastCode = toast ? extractOtpCode(toast.body) : null;
   const toastUi = toast ? (
     <div className="app-toast">
@@ -236,7 +270,10 @@ function App() {
           setScreen('offline');
         }}
         onOpenLms={(officer) => {
-          setLmsOfficer(officer);
+          setLmsOfficer({
+            ...officer,
+            mailOnly: Boolean(officer.mailOnly),
+          });
           setStaff(loadStaffSession());
           setScreen('lms');
         }}

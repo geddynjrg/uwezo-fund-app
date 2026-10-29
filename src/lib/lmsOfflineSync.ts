@@ -8,8 +8,12 @@ import {
   markOutbox,
   pendingMutationCount,
   putLocalReceipt,
+  putLocalRow,
+  deleteLocalRow,
   queueMutation,
   replaceLmsSnapshot,
+  listLmsTable,
+  setLmsActiveEmail,
   type LmsLocalMeta,
   type LmsTableName,
   newClientKey,
@@ -92,6 +96,7 @@ async function httpJson(
 
 /** Pull constituency LMS tables onto the phone. */
 export async function pullLmsSnapshot(email: string): Promise<SyncResult> {
+  setLmsActiveEmail(email);
   const cache = loadLmsCache(email);
   const host = cache?.host || 'https://lms.uwezo.go.ke';
   const cookie = cache?.cookie || '';
@@ -126,9 +131,10 @@ export async function pullLmsSnapshot(email: string): Promise<SyncResult> {
   };
 }
 
-/** Push queued offline mutations (receipts) to the live LMS. */
+/** Push queued offline mutations (receipts, members, groups) to the live LMS. */
 export async function pushLmsMutations(email: string): Promise<SyncResult> {
-  const pending = await listOutbox('pending');
+  setLmsActiveEmail(email);
+  const pending = await listOutbox('pending', email);
   if (!pending.length) {
     return { ok: true, detail: 'No offline changes waiting to sync.' };
   }
@@ -158,10 +164,10 @@ export async function pushLmsMutations(email: string): Promise<SyncResult> {
     if (!id) continue;
     if (result.ok) {
       accepted += 1;
-      await markOutbox(id, 'synced', String(result.detail || 'Synced'));
+      await markOutbox(id, 'synced', String(result.detail || 'Synced'), email);
     } else {
       rejected += 1;
-      await markOutbox(id, 'rejected', String(result.detail || 'Rejected'));
+      await markOutbox(id, 'rejected', String(result.detail || 'Rejected'), email);
     }
   }
   if (!results.length && !json.ok) {
@@ -186,13 +192,39 @@ async function sealIfPossible(email: string): Promise<boolean> {
  * 2) pull constituency tables for this user (when assigned)
  * 3) encrypt the offline database vault
  */
+function isNationalRole(role: string): boolean {
+  return /secretariat|headquarters|^hq$|accountant/i.test(role);
+}
+
 export async function syncLmsLocal(email: string): Promise<SyncResult> {
+  setLmsActiveEmail(email);
   const cache = loadLmsCache(email);
   if (!cache?.cookie) {
     return { ok: false, detail: 'No LMS session on this phone. Sign in again, then sync.' };
   }
 
+  const role = cache.role || 'staff';
   const pushed = await pushLmsMutations(email);
+
+  // National roles (secretariat / HQ / accountant) have no constituency snapshot by design.
+  // Drive sync from /app/mobile/national/phases so Refresh matches the live queues.
+  if (isNationalRole(role)) {
+    const national = await fetchNationalPhases(email);
+    const sealed = (await sealIfPossible(email)) || Boolean(lmsDbVaultStatus(email));
+    const parts = [
+      pushed.detail,
+      national.ok
+        ? `National queue ready (${national.rows.length} phase${national.rows.length === 1 ? '' : 's'}). Open Phases to review.`
+        : national.detail || 'Could not load the national phase queue.',
+      sealed ? 'Encrypted session data saved on this phone.' : '',
+    ].filter(Boolean);
+    return {
+      ok: Boolean(national.ok),
+      detail: parts.join(' '),
+      meta: await loadLmsMeta(email),
+    };
+  }
+
   const pulled = await pullLmsSnapshot(email);
 
   let sealed = false;
@@ -202,7 +234,6 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
     sealed = true;
   }
 
-  const role = cache.role || 'staff';
   const counts = pulled.meta?.counts
     ? Object.entries(pulled.meta.counts)
         .map(([name, value]) => `${name}:${value}`)
@@ -212,9 +243,7 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
     pushed.detail,
     pulled.ok
       ? `Pulled LMS database${counts ? ` (${counts})` : ''}.`
-      : role === 'constituency'
-        ? pulled.detail
-        : 'National / HQ roles use the live session; constituency encrypted DB sync is for assigned officers.',
+      : pulled.detail,
     sealed
       ? 'Encrypted LMS database saved on this phone.'
       : pulled.ok
@@ -224,13 +253,10 @@ export async function syncLmsLocal(email: string): Promise<SyncResult> {
           : '',
   ].filter(Boolean);
 
-  const ok =
-    role === 'constituency'
-      ? Boolean(pulled.ok && sealed)
-      : Boolean(cache.cookie) || sealed;
-
+  // Constituency officers need a successful pull. Encryption is best-effort: do not
+  // treat a missing seal password as a sync failure when tables already landed.
   return {
-    ok,
+    ok: Boolean(pulled.ok),
     detail: parts.join(' '),
     meta: pulled.meta || pushed.meta,
   };
@@ -282,6 +308,98 @@ export async function refreshLmsConnection(email: string, path = '/dashboard'): 
   };
 }
 
+/** Update a member offline; syncs to LMS when connected. */
+export async function saveMemberOffline(input: {
+  email: string;
+  id: number;
+  name: string;
+  number?: string;
+  gender?: string;
+  disabled?: boolean;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('members', 5000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Member is not in the offline database. Sync first.' };
+  }
+  const next = {
+    ...existing,
+    name: input.name.trim(),
+    number: input.number != null ? input.number.trim() : existing.number,
+    gender: input.gender != null ? input.gender : existing.gender,
+    disabled: input.disabled != null ? input.disabled : existing.disabled,
+    updated_at: new Date().toISOString(),
+    pending_sync: true,
+  };
+  await putLocalRow('members', next);
+  await queueMutation({
+    id: newClientKey(),
+    type: 'member.update',
+    payload: {
+      id: input.id,
+      name: input.name.trim(),
+      number: String(next.number || ''),
+      gender: String(next.gender || ''),
+      disabled: Boolean(next.disabled),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Member saved offline. Changes will sync to the LMS when online.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Update a group offline; syncs to LMS when connected. */
+export async function saveGroupOffline(input: {
+  email: string;
+  id: number;
+  name: string;
+  bank?: string;
+  account?: string;
+  location?: string;
+  box?: string;
+  status?: string;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('groups', 5000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Group is not in the offline database. Sync first.' };
+  }
+  const next = {
+    ...existing,
+    name: input.name.trim(),
+    bank: input.bank != null ? input.bank.trim() : existing.bank,
+    account: input.account != null ? input.account.trim() : existing.account,
+    location: input.location != null ? input.location.trim() : existing.location,
+    box: input.box != null ? input.box.trim() : existing.box,
+    status: input.status != null ? input.status.trim() : existing.status,
+    updated_at: new Date().toISOString(),
+    pending_sync: true,
+  };
+  await putLocalRow('groups', next);
+  await queueMutation({
+    id: newClientKey(),
+    type: 'group.update',
+    payload: {
+      id: input.id,
+      name: String(next.name || ''),
+      bank: String(next.bank || ''),
+      account: String(next.account || ''),
+      location: String(next.location || ''),
+      box: String(next.box || ''),
+      status: String(next.status || ''),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Group saved offline. Changes will sync to the LMS when online.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
 /** Record a receipt offline; syncs to LMS when connected. */
 export async function saveReceiptOffline(input: {
   email: string;
@@ -325,5 +443,662 @@ export async function saveReceiptOffline(input: {
     ok: true,
     detail: 'Receipt saved in the encrypted offline database. Compare with the LMS when lms.uwezo.go.ke is reachable.',
     meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function updateReceiptOffline(input: {
+  email: string;
+  id: number;
+  receipt_number: string;
+  transaction_date: string;
+  amount: number;
+  payment: 'Bank' | 'Mpesa';
+  reference_number: string;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('loan_receipts', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Receipt is not in the offline database. Sync first.' };
+  }
+  if (String(existing.status || 'active') !== 'active' && String(existing.status) !== 'pending_sync') {
+    return { ok: false, detail: 'Only active receipts can be edited.' };
+  }
+  const next = {
+    ...existing,
+    receipt_number: input.receipt_number.toUpperCase(),
+    transaction_date: input.transaction_date,
+    amount: input.amount,
+    payment: input.payment,
+    reference_number: input.reference_number.toUpperCase(),
+    updated_at: new Date().toISOString(),
+    pending_sync: true,
+  };
+  await putLocalReceipt(next);
+  await queueMutation({
+    id: newClientKey(),
+    type: 'receipt.update',
+    payload: {
+      id: input.id,
+      receipt_number: input.receipt_number.toUpperCase(),
+      transaction_date: input.transaction_date,
+      amount: input.amount,
+      payment: input.payment,
+      reference_number: input.reference_number.toUpperCase(),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Receipt updated offline. Changes will sync to the LMS when online.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function voidReceiptOffline(input: {
+  email: string;
+  id: number;
+  void_reason: string;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('loan_receipts', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Receipt is not in the offline database. Sync first.' };
+  }
+  if (String(existing.status || 'active') !== 'active') {
+    return { ok: false, detail: 'Only active receipts can be voided.' };
+  }
+  await putLocalReceipt({
+    ...existing,
+    status: 'canceled',
+    void_reason: input.void_reason.trim(),
+    updated_at: new Date().toISOString(),
+    pending_sync: true,
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'receipt.void',
+    payload: { id: input.id, void_reason: input.void_reason.trim() },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Receipt voided offline. Sync will cancel it on the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function createMemberOffline(input: {
+  email: string;
+  group_loans_id: number;
+  name: string;
+  member_Id: string;
+  number?: string;
+  gender?: string;
+  role?: string;
+  disabled?: boolean;
+}): Promise<SyncResult> {
+  const id = newClientKey();
+  const memberPk = `local-member-${id}`;
+  const linkPk = `local-link-${id}`;
+  const loans = await listLmsTable('group_loans', 10000);
+  const loan = loans.find((row) => Number(row.id) === input.group_loans_id);
+  await putLocalRow('members', {
+    id: memberPk,
+    name: input.name.trim(),
+    member_Id: input.member_Id.trim(),
+    number: (input.number || '').trim(),
+    gender: input.gender || 'Male',
+    disabled: Boolean(input.disabled),
+    pending_sync: true,
+    created_at: new Date().toISOString(),
+  });
+  await putLocalRow('group_members', {
+    id: linkPk,
+    group_loans_id: input.group_loans_id,
+    group_id: loan?.group_id ?? null,
+    member_Id: input.member_Id.trim(),
+    member_id: memberPk,
+    role: input.role || 'Member',
+    status: 'Active',
+    pending_sync: true,
+  });
+  await queueMutation({
+    id,
+    type: 'member.create',
+    payload: {
+      group_loans_id: input.group_loans_id,
+      name: input.name.trim(),
+      member_Id: input.member_Id.trim(),
+      number: (input.number || '').trim(),
+      gender: input.gender || 'Male',
+      role: input.role || 'Member',
+      disabled: Boolean(input.disabled),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Member added offline. Sync will create them on the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function deleteMemberOffline(input: {
+  email: string;
+  group_member_id: number | string;
+}): Promise<SyncResult> {
+  const links = await listLmsTable('group_members', 20000);
+  const existing = links.find((row) => String(row.id) === String(input.group_member_id));
+  if (!existing) {
+    return { ok: false, detail: 'Member link is not in the offline database. Sync first.' };
+  }
+  await deleteLocalRow('group_members', existing.id as string | number);
+  const numericId = Number(input.group_member_id);
+  if (!Number.isFinite(numericId) || String(input.group_member_id).startsWith('local-')) {
+    return {
+      ok: true,
+      detail: 'Local unsynced member removed from this phone.',
+      meta: await loadLmsMeta(input.email),
+    };
+  }
+  await queueMutation({
+    id: newClientKey(),
+    type: 'member.delete',
+    payload: { group_member_id: numericId },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Member removal queued. Sync will delete the link on the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function approveApplicationOffline(input: {
+  email: string;
+  id: number;
+  amount_approved?: number;
+  comments?: string;
+  group_id?: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  const next = {
+    ...existing,
+    amount_approved: input.amount_approved ?? existing.amount_approved ?? existing.amount_applied,
+    status: 'pending_submission_to_hq',
+    level: 'constituency',
+    action: 'approved_at_constituency',
+    comments: input.comments?.trim() || existing.comments,
+    group_id: input.group_id ?? existing.group_id,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  };
+  await putLocalRow('phase_applications', next);
+  const payload: Record<string, string | number | boolean> = { id: input.id };
+  if (input.amount_approved != null) payload.amount_approved = input.amount_approved;
+  if (input.comments) payload.comments = input.comments.trim();
+  if (input.group_id) payload.group_id = input.group_id;
+  await queueMutation({ id: newClientKey(), type: 'application.approve', payload });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Application approved offline. Sync will push the decision to the LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function rejectApplicationOffline(input: {
+  email: string;
+  id: number;
+  rejection_reason: string;
+  rejection_message: string;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    status: 'rejected',
+    level: 'constituency',
+    action: 'declined_at_constituency',
+    rejection_reason: input.rejection_reason.trim(),
+    rejection_message: input.rejection_message.trim(),
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.reject',
+    payload: {
+      id: input.id,
+      rejection_reason: input.rejection_reason.trim(),
+      rejection_message: input.rejection_message.trim(),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Application rejected offline. Sync will push the decision to the LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function linkApplicationOffline(input: {
+  email: string;
+  id: number;
+  group_id: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  const groups = await listLmsTable('groups', 5000);
+  const group = groups.find((row) => Number(row.id) === input.group_id);
+  await putLocalRow('phase_applications', {
+    ...existing,
+    group_id: input.group_id,
+    group_code: group?.code || existing.group_code,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.link',
+    payload: { id: input.id, group_id: input.group_id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Application linked to group offline. Sync will update the LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Unlink master group from a phase application (live removeLink). */
+export async function unlinkApplicationOffline(input: {
+  email: string;
+  id: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  if (!existing.group_id) {
+    return { ok: false, detail: 'This application is not linked to a master group.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    group_id: null,
+    group_code: null,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.unlink',
+    payload: { id: input.id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Group unlinked offline. Sync will update the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Assign (or reassign) an application to a review phase. */
+export async function assignApplicationPhaseOffline(input: {
+  email: string;
+  id: number;
+  loan_phase_id: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  const phases = await listLmsTable('loan_phases', 5000);
+  const phase = phases.find((row) => Number(row.id) === input.loan_phase_id);
+  if (!phase) {
+    return { ok: false, detail: 'Selected phase is not in the offline database. Sync first.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    loan_phase_id: input.loan_phase_id,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.assign_phase',
+    payload: { id: input.id, loan_phase_id: input.loan_phase_id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: `Assigned to phase ${String(phase.phase || phase.phase_ref || input.loan_phase_id)} offline. Sync will update the LMS.`,
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Remove an application from its current review phase. */
+export async function removeApplicationPhaseOffline(input: {
+  email: string;
+  id: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  if (!existing.loan_phase_id) {
+    return { ok: false, detail: 'This application is not assigned to a phase.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    loan_phase_id: null,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.remove_phase',
+    payload: { id: input.id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Removed from phase offline. Sync will update the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Return application to the group for correction (mirrors live LMS Return to group). */
+export async function returnApplicationOffline(input: {
+  email: string;
+  id: number;
+  comment: string;
+}): Promise<SyncResult> {
+  const comment = input.comment.trim();
+  if (comment.length < 20) {
+    return { ok: false, detail: 'Tell the group what to correct (at least 20 characters).' };
+  }
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  const status = String(existing.status || '').toLowerCase();
+  if (status && status !== 'pending' && !/new|submitted|review|task/.test(status)) {
+    return { ok: false, detail: 'Only applications awaiting constituency decision can be returned to the group.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    status: 'deferred',
+    level: 'constituency',
+    action: 'returned_to_applicant',
+    rejection_reason: 'incomplete_information',
+    rejection_message: comment,
+    comments: comment,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.return',
+    payload: { id: input.id, comment },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Returned to group offline. Sync will mark it draft on the live LMS (SMS sends when online).',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Undo approve/reject and put the application back to pending (live Review decision). */
+export async function reviewApplicationOffline(input: {
+  email: string;
+  id: number;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('phase_applications', 10000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  const status = String(existing.status || '').toLowerCase();
+  if (!/reject|pending_submission_to_hq|approv/.test(status)) {
+    return { ok: false, detail: 'Current status does not allow reviewing the decision.' };
+  }
+  await putLocalRow('phase_applications', {
+    ...existing,
+    status: 'pending',
+    level: 'constituency',
+    action: 'review',
+    amount_approved: 0,
+    comments: null,
+    rejection_reason: null,
+    rejection_message: null,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'application.review',
+    payload: { id: input.id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Decision reviewed offline — application is pending again. Sync will update the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function createPhaseOffline(input: {
+  email: string;
+  phase: string;
+  phase_ref?: string;
+  review_date?: string;
+  review_venue?: string;
+}): Promise<SyncResult> {
+  const id = newClientKey();
+  const localId = `local-phase-${id}`;
+  await putLocalRow('loan_phases', {
+    id: localId,
+    phase: input.phase.trim(),
+    phase_ref: (input.phase_ref || '').trim() || `MOB-${Date.now()}`,
+    status: 'draft',
+    review_date: input.review_date || null,
+    review_venue: (input.review_venue || '').trim(),
+    total_amount_applied: 0,
+    total_amount_approved: 0,
+    amount_disbursed: 0,
+    pending_sync: true,
+    created_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id,
+    type: 'phase.create',
+    payload: {
+      phase: input.phase.trim(),
+      phase_ref: (input.phase_ref || '').trim(),
+      review_date: input.review_date || '',
+      review_venue: (input.review_venue || '').trim(),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Phase created offline. Sync will create it on the live LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function updatePhaseOffline(input: {
+  email: string;
+  id: number;
+  phase: string;
+  review_date?: string;
+  review_venue?: string;
+  committee_remarks?: string;
+}): Promise<SyncResult> {
+  const rows = await listLmsTable('loan_phases', 5000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Phase is not in the offline database. Sync first.' };
+  }
+  if (['submitted', 'hq_approved', 'disbursed'].includes(String(existing.status))) {
+    return { ok: false, detail: 'This phase can no longer be edited from the phone.' };
+  }
+  await putLocalRow('loan_phases', {
+    ...existing,
+    phase: input.phase.trim(),
+    review_date: input.review_date ?? existing.review_date,
+    review_venue: input.review_venue ?? existing.review_venue,
+    committee_remarks: input.committee_remarks ?? existing.committee_remarks,
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'phase.update',
+    payload: {
+      id: input.id,
+      phase: input.phase.trim(),
+      review_date: input.review_date || '',
+      review_venue: (input.review_venue || '').trim(),
+      committee_remarks: (input.committee_remarks || '').trim(),
+    },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Phase updated offline. Sync will push changes to the LMS.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+export async function submitPhaseOffline(input: { email: string; id: number }): Promise<SyncResult> {
+  const rows = await listLmsTable('loan_phases', 5000);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Phase is not in the offline database. Sync first.' };
+  }
+  const apps = await listLmsTable('phase_applications', 10000);
+  const ready = apps.filter(
+    (app) =>
+      String(app.loan_phase_id) === String(input.id) &&
+      /pending_submission_to_hq|approved|submitted/i.test(String(app.status || '')),
+  );
+  if (!ready.length) {
+    return { ok: false, detail: 'Approve at least one application before submitting the phase to HQ.' };
+  }
+  await putLocalRow('loan_phases', {
+    ...existing,
+    status: 'submitted',
+    submitted_to_hq_at: new Date().toISOString(),
+    pending_sync: true,
+    updated_at: new Date().toISOString(),
+  });
+  await queueMutation({
+    id: newClientKey(),
+    type: 'phase.submit',
+    payload: { id: input.id },
+  });
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: 'Phase queued for HQ submission. Sync while online to complete.',
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Online-first national HQ / Secretariat / Accountant APIs. */
+export async function fetchNationalPhases(email: string, status = ''): Promise<{
+  ok: boolean;
+  detail: string;
+  rows: Record<string, unknown>[];
+  role?: string;
+}> {
+  const cache = loadLmsCache(email);
+  const host = cache?.host || 'https://lms.uwezo.go.ke';
+  const cookie = cache?.cookie || '';
+  if (!cookie) {
+    return { ok: false, detail: 'Sign in to the LMS first.', rows: [] };
+  }
+  const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+  const { status: httpStatus, json } = await httpJson('GET', `${host}/app/mobile/national/phases${qs}`, cookie);
+  if (httpStatus === 401 || httpStatus === 403) {
+    return { ok: false, detail: String(json.detail || 'LMS session expired or role not allowed.'), rows: [] };
+  }
+  if (!json.ok) {
+    return { ok: false, detail: String(json.detail || 'Could not load national phases.'), rows: [] };
+  }
+  return {
+    ok: true,
+    detail: '',
+    rows: Array.isArray(json.rows) ? (json.rows as Record<string, unknown>[]) : [],
+    role: String(json.role || ''),
+  };
+}
+
+export async function fetchNationalApplications(email: string, phaseId?: number): Promise<{
+  ok: boolean;
+  detail: string;
+  rows: Record<string, unknown>[];
+}> {
+  const cache = loadLmsCache(email);
+  const host = cache?.host || 'https://lms.uwezo.go.ke';
+  const cookie = cache?.cookie || '';
+  if (!cookie) {
+    return { ok: false, detail: 'Sign in to the LMS first.', rows: [] };
+  }
+  const qs = phaseId ? `?phase_id=${phaseId}` : '';
+  const { status: httpStatus, json } = await httpJson('GET', `${host}/app/mobile/national/applications${qs}`, cookie);
+  if (httpStatus === 401 || httpStatus === 403) {
+    return { ok: false, detail: String(json.detail || 'LMS session expired or role not allowed.'), rows: [] };
+  }
+  if (!json.ok) {
+    return { ok: false, detail: String(json.detail || 'Could not load national applications.'), rows: [] };
+  }
+  return {
+    ok: true,
+    detail: '',
+    rows: Array.isArray(json.rows) ? (json.rows as Record<string, unknown>[]) : [],
+  };
+}
+
+export async function decideNationalPhase(input: {
+  email: string;
+  phase_id: number;
+  decision: 'approve' | 'return';
+  notes?: string;
+}): Promise<SyncResult> {
+  const cache = loadLmsCache(input.email);
+  const host = cache?.host || 'https://lms.uwezo.go.ke';
+  const cookie = cache?.cookie || '';
+  if (!cookie) {
+    return { ok: false, detail: 'Sign in online to decide national phases.' };
+  }
+  const { status, json } = await httpJson('POST', `${host}/app/mobile/national/decide`, cookie, {
+    phase_id: input.phase_id,
+    decision: input.decision,
+    notes: input.notes || '',
+  });
+  if (status === 401 || status === 403) {
+    return { ok: false, detail: String(json.detail || 'Not allowed for this role.') };
+  }
+  return {
+    ok: Boolean(json.ok),
+    detail: String(json.detail || (json.ok ? 'Decision saved.' : 'Decision failed.')),
   };
 }

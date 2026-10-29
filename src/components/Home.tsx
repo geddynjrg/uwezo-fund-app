@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
+import { openEboardHome } from '../lib/eboard';
 import { openExternal } from '../lib/openLink';
 import type { PortalAvailability, PortalId } from '../lib/portalStatus';
 import type { AppSession } from '../lib/session';
@@ -26,7 +27,7 @@ type HomeProps = {
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.1.45';
+const PACKAGE_VERSION = '1.2.5';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -168,7 +169,9 @@ export function Home({
           >
             <span className="link-card__title">{link.title}</span>
             <span className="link-card__sub">{link.subtitle}</span>
-            <span className="link-card__url">{link.url.replace(/^https:\/\//, '')}</span>
+            {link.url ? (
+              <span className="link-card__url">{link.url.replace(/^https:\/\//, '')}</span>
+            ) : null}
             {link.id === 'loans' || link.id === 'majuu' ? (
               <span className="link-card__sub">
                 {portals[link.id] === false
@@ -198,13 +201,30 @@ export function Home({
         {staff ? (
           <>
             <p className="home-session">
-              Signed in as {staff.email}{staff.constituency ? ` · ${staff.constituency}` : ''}
+              Signed in as {staff.email}
+              {staff.mailOnly
+                ? ' · Mail only'
+                : staff.constituency
+                  ? ` · ${staff.constituency}`
+                  : ''}
+              {staff.eboardVerified ? ' · eBoard' : ''}
             </p>
             <button type="button" className="btn-primary" onClick={onOpenStaff}>
-              Open LMS
+              {staff.mailOnly ? 'Open Mail' : 'Open LMS'}
             </button>
+            {staff.eboardVerified ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void openEboardHome()}
+              >
+                Open eBoard
+              </button>
+            ) : null}
             <p className="home-chat-note">
-              Headquarters, accounts, and constituency pages stay on this phone until you log out.
+              {staff.mailOnly
+                ? 'This Uwezo mailbox is not an LMS user. Mail stays available until you log out.'
+                : 'Headquarters, accounts, and constituency pages stay on this phone until you log out.'}
             </p>
           </>
         ) : null}
@@ -227,6 +247,11 @@ export function Home({
               Stay signed in so OTPs arrive as phone notifications even when this app is closed.
               Tap Copy OTP on the notification, then paste the code where you need it.
             </p>
+            {session.eboardVerified ? (
+              <button type="button" className="btn-ghost" onClick={() => void openEboardHome()}>
+                Open eBoard
+              </button>
+            ) : null}
             <button type="button" className="btn-ghost" onClick={onOpenAccount}>
               Account settings
             </button>

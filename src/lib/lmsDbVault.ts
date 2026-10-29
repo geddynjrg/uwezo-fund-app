@@ -7,6 +7,7 @@ import {
   loadLmsMeta,
   replaceLmsSnapshot,
   replaceOutbox,
+  setLmsActiveEmail,
   type LmsLocalMeta,
   type LmsOutboxItem,
   type LmsTableName,
@@ -75,11 +76,12 @@ export function lmsDbVaultStatus(email: string): { savedAt: string } | null {
 /** Encrypt the current working LMS tables + outbox onto the phone. */
 export async function sealLmsDatabase(email: string, password: string): Promise<boolean> {
   if (!password || !crypto.subtle) return false;
+  setLmsActiveEmail(email);
   const meta = await loadLmsMeta(email);
   if (!meta) return false;
   const tables: Partial<Record<LmsTableName, Record<string, unknown>[]>> = {};
   for (const table of LMS_TABLES) {
-    tables[table] = await listLmsTable(table, 20000);
+    tables[table] = await listLmsTable(table, 20000, email);
   }
   const payload: VaultPayload = {
     meta: {
@@ -92,7 +94,7 @@ export async function sealLmsDatabase(email: string, password: string): Promise<
       pendingMutations: meta.pendingMutations,
     },
     tables,
-    outbox: await listOutbox(),
+    outbox: await listOutbox(undefined, email),
   };
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -115,6 +117,7 @@ export async function openLmsDatabase(email: string, password: string): Promise<
   const envelope = envelopes()[email.trim().toLowerCase()];
   if (!envelope || !password || !crypto.subtle) return null;
   try {
+    setLmsActiveEmail(email);
     const key = await derivedKey(password, base64ToBytes(envelope.salt));
     const plain = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: base64ToBytes(envelope.iv) as BufferSource },
@@ -131,7 +134,7 @@ export async function openLmsDatabase(email: string, password: string): Promise<
       counts: payload.meta.counts || {},
       tables: payload.tables || {},
     });
-    await replaceOutbox(payload.outbox || []);
+    await replaceOutbox(payload.outbox || [], email);
     return loadLmsMeta(email);
   } catch {
     return null;

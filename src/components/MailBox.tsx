@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { loadStaffSession, saveStaffSession, type MailLink } from '../lib/staffSession';
-import { isUwezoMailbox, signInMailbox, standardMailboxPassword } from '../lib/zimbraAuth';
+import { isUwezoMailbox, openMailboxForOfficer, standardMailboxPassword } from '../lib/zimbraAuth';
 import {
   MAIL_FOLDERS,
   attachmentDataUrl,
+  buildMailQuery,
   fetchAttachment,
+  flagMail,
+  forwardSubject,
   listMail,
+  markMailRead,
   moveMail,
   parseMessageDetail,
   parseMessages,
+  quoteForwardHtml,
   quoteHtml,
+  readConversation,
   readMail,
   replySubject,
   saveDraft,
@@ -35,6 +41,101 @@ const SIZES = [
   { label: 'Large', value: '5' },
   { label: 'Largest', value: '6' },
 ];
+
+const AVATAR_COLORS = ['#1a73e8', '#d93025', '#188038', '#e37400', '#9334e6', '#007b83', '#c5221f', '#1967d2'];
+
+function Icon({ children, size = 22 }: { children: ReactNode; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden focusable="false">
+      {children}
+    </svg>
+  );
+}
+
+const IcMenu = () => (
+  <Icon>
+    <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z" />
+  </Icon>
+);
+const IcBack = () => (
+  <Icon>
+    <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+  </Icon>
+);
+const IcClose = () => (
+  <Icon>
+    <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+  </Icon>
+);
+const IcSend = () => (
+  <Icon>
+    <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
+  </Icon>
+);
+const IcAttach = () => (
+  <Icon>
+    <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-1.93-1.57-3.5-3.5-3.5S8 3.07 8 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-2.5z" />
+  </Icon>
+);
+const IcDelete = () => (
+  <Icon>
+    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+  </Icon>
+);
+const IcArchive = () => (
+  <Icon>
+    <path d="M20.54 5.23 19.15 3.55A1.99 1.99 0 0 0 17.56 3H6.44c-.61 0-1.18.28-1.59.75L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5 6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z" />
+  </Icon>
+);
+const IcSpam = () => (
+  <Icon>
+    <path d="M12 2 1 21h22L12 2zm1 14h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+  </Icon>
+);
+const IcStar = ({ filled }: { filled?: boolean }) => (
+  <Icon>
+    {filled ? (
+      <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+    ) : (
+      <path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z" />
+    )}
+  </Icon>
+);
+const IcReply = () => (
+  <Icon size={18}>
+    <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
+  </Icon>
+);
+const IcReplyAll = () => (
+  <Icon size={18}>
+    <path d="M7 8V5l-7 7 7 7v-3l-4-4 4-4zm6 1V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" />
+  </Icon>
+);
+const IcForward = () => (
+  <Icon size={18}>
+    <path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z" />
+  </Icon>
+);
+const IcCheck = () => (
+  <Icon size={20}>
+    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+  </Icon>
+);
+const IcUncheck = () => (
+  <Icon size={20}>
+    <path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+  </Icon>
+);
+const IcEdit = () => (
+  <Icon size={20}>
+    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+  </Icon>
+);
+const IcPaperclip = () => (
+  <Icon size={16}>
+    <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-1.93-1.57-3.5-3.5-3.5S8 3.07 8 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-2.5z" />
+  </Icon>
+);
 
 function signatureStore(): Record<string, string> {
   try {
@@ -95,30 +196,134 @@ function uniqueAddresses(values: string[], skip: string[] = []): string[] {
   return out;
 }
 
+function parseAddressList(value: string): string[] {
+  return uniqueAddresses(value.split(/[,;\s]+/).filter(Boolean));
+}
+
+function displayName(address: string): string {
+  const personal = /"([^"]+)"/.exec(address)?.[1];
+  if (personal) return personal;
+  const angle = /<([^>]+)>/.exec(address)?.[1];
+  const raw = (angle || address).trim();
+  const local = raw.split('@')[0] || raw;
+  return local.replace(/[._]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function avatarLetter(address: string): string {
+  const name = displayName(address).trim();
+  return (name.charAt(0) || '?').toUpperCase();
+}
+
+function avatarColor(address: string): string {
+  let hash = 0;
+  for (let i = 0; i < address.length; i += 1) hash = (hash + address.charCodeAt(i) * (i + 1)) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[hash];
+}
+
+type ChipFieldProps = {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  trailing?: ReactNode;
+};
+
+function ChipField({ label, value, onChange, placeholder, trailing }: ChipFieldProps) {
+  const [draft, setDraft] = useState('');
+  const chips = parseAddressList(value);
+
+  function commit(raw: string) {
+    const next = uniqueAddresses([...chips, ...parseAddressList(raw)]);
+    onChange(next.join(', '));
+    setDraft('');
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter' || event.key === ',' || event.key === ';' || event.key === 'Tab') {
+      if (draft.trim()) {
+        event.preventDefault();
+        commit(draft);
+      }
+    } else if (event.key === 'Backspace' && !draft && chips.length) {
+      onChange(chips.slice(0, -1).join(', '));
+    }
+  }
+
+  return (
+    <div className="gmail-compose-field">
+      <span className="gmail-compose-label">{label}</span>
+      <div className="gmail-chip-row">
+        {chips.map((chip) => (
+          <span className="gmail-chip" key={chip.toLowerCase()}>
+            <span className="gmail-chip-avatar" style={{ background: avatarColor(chip) }}>
+              {avatarLetter(chip)}
+            </span>
+            <span className="gmail-chip-text">{chip}</span>
+            <button
+              type="button"
+              className="gmail-chip-x"
+              aria-label={`Remove ${chip}`}
+              onClick={() => onChange(chips.filter((item) => item.toLowerCase() !== chip.toLowerCase()).join(', '))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          className="gmail-chip-input"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => {
+            if (draft.trim()) commit(draft);
+          }}
+          placeholder={chips.length ? '' : placeholder}
+          aria-label={label}
+        />
+        {trailing}
+      </div>
+    </div>
+  );
+}
+
 export function MailBox({ onPasswordReset }: MailBoxProps) {
   const staff = loadStaffSession();
   const [mail, setMail] = useState<MailLink | null>(() => staff?.mail || null);
   const [email, setEmail] = useState(staff?.email || '');
   const [password, setPassword] = useState('');
   const [folder, setFolder] = useState<MailFolderId>('inbox');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [searchApplied, setSearchApplied] = useState('');
   const [items, setItems] = useState<MailItem[]>([]);
+  const [mailOffset, setMailOffset] = useState(0);
+  const [hasMoreMail, setHasMoreMail] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const [open, setOpen] = useState<MailDetail | null>(null);
+  const [threadStack, setThreadStack] = useState<MailItem[]>([]);
+  const [open, setOpen] = useState<(MailDetail & { starred?: boolean; isConversation?: boolean }) | null>(null);
+  const PAGE_SIZE = 50;
   const [preview, setPreview] = useState<{ part: MailPart; url: string; name: string; type: string; base64: string } | null>(null);
   const [composing, setComposing] = useState(false);
   const [settings, setSettings] = useState(false);
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState('');
   const [origId, setOrigId] = useState('');
+  const [replyType, setReplyType] = useState<'r' | 'w' | ''>('');
   const [attachments, setAttachments] = useState<MailAttachment[]>([]);
   const [signature, setSignature] = useState(() => (staff?.email ? loadSignature(staff.email) : ''));
   const [includeSignature, setIncludeSignature] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const editorRef = useRef<HTMLDivElement>(null);
   const draftHtml = useRef('');
+  const autoConnectDone = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function storeMail(next: MailLink, passwordReset: boolean) {
     const current = loadStaffSession();
@@ -131,8 +336,32 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     setMail(next);
     setSignature(loadSignature(next.email));
     if (passwordReset) {
-      onPasswordReset(`The mailbox password had expired. It is now ${standardMailboxPassword()}. Use that password the next time a sign-in is required.`);
+      onPasswordReset(
+        `Your mailbox password had expired and was reset to ${standardMailboxPassword()}. Use that password the next time a mailbox sign-in is required.`,
+      );
     }
+  }
+
+  async function refreshMailToken(current: MailLink): Promise<MailLink | null> {
+    const preferDelegate =
+      current.via === 'delegate' ||
+      staff?.authVia === 'lms' ||
+      Boolean(staff?.eboardVerified) ||
+      !current.password;
+    const sessionPassword = current.password || (!preferDelegate ? staff?.password || standardMailboxPassword() : '');
+    const opened = await openMailboxForOfficer(current.email, sessionPassword, preferDelegate);
+    if (!opened.ok) {
+      setError(opened.message);
+      return null;
+    }
+    const next: MailLink = {
+      email: opened.email,
+      token: opened.token,
+      password: opened.password || (opened.via === 'password' ? sessionPassword : ''),
+      via: opened.via || (preferDelegate ? 'delegate' : 'password'),
+    };
+    storeMail(next, opened.passwordReset);
+    return next;
   }
 
   async function tokenFor(action: (token: string) => Promise<{ ok: boolean; xml: string; authFailed: boolean; detail: string }>) {
@@ -140,47 +369,94 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     if (!current) return null;
     let result = await action(current.token);
     if (!result.authFailed) return result;
-    const signed = await signInMailbox(current.email, current.password);
-    if (!signed.ok) {
-      setError(signed.message);
-      return null;
-    }
-    const next = { email: signed.email, token: signed.token, password: signed.password };
-    storeMail(next, signed.passwordReset);
-    return action(signed.token);
+    const refreshed = await refreshMailToken(current);
+    if (!refreshed) return null;
+    return action(refreshed.token);
   }
 
-  async function loadFolder(nextFolder: MailFolderId, link: MailLink | null = mail) {
+  async function loadFolder(
+    nextFolder: MailFolderId,
+    link: MailLink | null = mail,
+    options: { searchText?: string; append?: boolean; offset?: number } = {},
+  ) {
     if (!link) return;
+    const folderQuery = MAIL_FOLDERS.find((item) => item.id === nextFolder)?.query || 'in:inbox';
+    const searchText = options.searchText ?? searchApplied;
+    const offset = options.offset ?? 0;
+    const query = buildMailQuery(folderQuery, searchText);
+    const types = nextFolder === 'drafts' ? 'message' : 'conversation';
     setBusy(true);
     setError('');
-    const query = MAIL_FOLDERS.find((item) => item.id === nextFolder)?.query || 'in:inbox';
-    const result = await tokenFor((token) => listMail(token, query));
+    const result = await tokenFor((token) =>
+      listMail(token, { query, limit: PAGE_SIZE, offset, types }),
+    );
     setBusy(false);
     if (!result) return;
     if (!result.ok) {
       setError(result.detail);
-      setItems([]);
+      if (!options.append) setItems([]);
       return;
     }
-    setItems(parseMessages(result.xml));
-    setSelected([]);
+    const parsed = parseMessages(result.xml);
+    setItems((current) => (options.append ? [...current, ...parsed] : parsed));
+    setMailOffset(offset + parsed.length);
+    setHasMoreMail(parsed.length >= PAGE_SIZE);
+    if (!options.append) setSelected([]);
+    setThreadStack([]);
+  }
+
+  async function runSearch(event?: FormEvent) {
+    event?.preventDefault();
+    setSearchApplied(search.trim());
+    await loadFolder(folder, mail, { searchText: search.trim(), offset: 0 });
+  }
+
+  async function loadMoreMail() {
+    await loadFolder(folder, mail, { append: true, offset: mailOffset });
+  }
+
+  async function connectMailbox(targetEmail: string, mailboxPassword = '', preferDelegate = false) {
+    setConnecting(true);
+    setError('');
+    const opened = await openMailboxForOfficer(targetEmail, mailboxPassword, preferDelegate);
+    setConnecting(false);
+    if (!opened.ok) {
+      setError(opened.message);
+      return false;
+    }
+    storeMail(
+      {
+        email: opened.email,
+        token: opened.token,
+        password: opened.password,
+        via: opened.via || (opened.password ? 'password' : 'delegate'),
+      },
+      opened.passwordReset,
+    );
+    setMessage(`Mailbox ${opened.email} is connected on this phone.`);
+    return true;
   }
 
   useEffect(() => {
+    if (autoConnectDone.current) return;
     const current = loadStaffSession();
-    if (!current || current.mail || !current.password || !isUwezoMailbox(current.email)) return;
-    let cancelled = false;
+    if (!current || !isUwezoMailbox(current.email)) return;
+    if (current.mail?.token) {
+      autoConnectDone.current = true;
+      return;
+    }
+    autoConnectDone.current = true;
     void (async () => {
-      const signed = await signInMailbox(current.email, current.password);
-      if (cancelled || !signed.ok) return;
-      storeMail({ email: signed.email, token: signed.token, password: signed.password }, signed.passwordReset);
-      setMessage(`Mailbox ${signed.email} is connected on this phone.`);
+      const preferDelegate =
+        current.authVia === 'lms' ||
+        Boolean(current.eboardVerified) ||
+        current.mail?.via === 'delegate' ||
+        !current.mail?.password;
+      const pwd = preferDelegate
+        ? ''
+        : current.mail?.password || current.password || standardMailboxPassword();
+      await connectMailbox(current.email, pwd, preferDelegate);
     })();
-    return () => {
-      cancelled = true;
-    };
-    // Open the mailbox with the password already used to enter the app.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -188,7 +464,7 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     if (!mail) return;
     void loadFolder(folder, mail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [folder, mail?.email]);
+  }, [folder, mail?.email, mail?.token]);
 
   useEffect(() => {
     if (!composing || !editorRef.current) return;
@@ -200,17 +476,8 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
 
   async function connect(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError('');
-    const signed = await signInMailbox(email, password);
-    setBusy(false);
-    if (!signed.ok) {
-      setError(signed.message);
-      return;
-    }
-    storeMail({ email: signed.email, token: signed.token, password: signed.password }, signed.passwordReset);
+    await connectMailbox(email, password);
     setPassword('');
-    setMessage(`Mailbox ${signed.email} is connected on this phone.`);
   }
 
   function format(command: string, value?: string) {
@@ -218,16 +485,42 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     document.execCommand(command, false, value);
   }
 
-  function startCompose(next?: { to?: string; cc?: string; subject?: string; html?: string; origId?: string }) {
+  function resetComposeFields() {
+    setTo('');
+    setCc('');
+    setBcc('');
+    setShowCc(false);
+    setShowBcc(false);
+    setSubject('');
+    setOrigId('');
+    setReplyType('');
+    setAttachments([]);
+    if (editorRef.current) editorRef.current.innerHTML = '';
+  }
+
+  function startCompose(next?: {
+    to?: string;
+    cc?: string;
+    bcc?: string;
+    subject?: string;
+    html?: string;
+    origId?: string;
+    replyType?: 'r' | 'w';
+  }) {
     setPreview(null);
     setOpen(null);
     setSettings(false);
+    setDrawerOpen(false);
     setComposing(true);
     setError('');
     setTo(next?.to || '');
     setCc(next?.cc || '');
+    setBcc(next?.bcc || '');
+    setShowCc(Boolean(next?.cc));
+    setShowBcc(Boolean(next?.bcc));
     setSubject(next?.subject || '');
     setOrigId(next?.origId || '');
+    setReplyType(next?.replyType || '');
     setAttachments([]);
     draftHtml.current = next?.html || '';
     if (editorRef.current) editorRef.current.innerHTML = next?.html || '';
@@ -236,16 +529,62 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
   function startReply(detail: MailDetail, all: boolean) {
     const self = mail?.email || '';
     const toList = uniqueAddresses([detail.from], [self]);
-    const ccList = all
-      ? uniqueAddresses([...detail.to, ...detail.cc], [self, ...toList])
-      : [];
+    const ccList = all ? uniqueAddresses([...detail.to, ...detail.cc], [self, ...toList]) : [];
     startCompose({
       to: toList.join(', '),
       cc: ccList.join(', '),
       subject: replySubject(detail.subject),
       html: quoteHtml(detail),
       origId: detail.id,
+      replyType: 'r',
     });
+  }
+
+  async function startForward(detail: MailDetail) {
+    startCompose({
+      to: '',
+      subject: forwardSubject(detail.subject),
+      html: quoteForwardHtml(detail),
+      origId: detail.id,
+      replyType: 'w',
+    });
+    if (!detail.attachments.length) return;
+    setBusy(true);
+    setError('');
+    const current = mail || loadStaffSession()?.mail || null;
+    if (!current) {
+      setBusy(false);
+      return;
+    }
+    const next: MailAttachment[] = [];
+    for (const part of detail.attachments.slice(0, 5)) {
+      let result = await fetchAttachment(current.token, detail.id, part.part);
+      if (result.authFailed) {
+        const refreshed = await refreshMailToken(current);
+        if (!refreshed) break;
+        result = await fetchAttachment(refreshed.token, detail.id, part.part);
+      }
+      if (result.ok && result.base64) {
+        next.push({
+          name: result.name || part.name,
+          type: result.type || part.type || 'application/octet-stream',
+          base64: result.base64,
+        });
+      }
+    }
+    setAttachments(next);
+    setBusy(false);
+    if (next.length) setMessage(`Forwarding with ${next.length} attachment(s).`);
+  }
+
+  function discardCompose() {
+    const hasContent =
+      Boolean(to.trim() || cc.trim() || bcc.trim() || subject.trim() || attachments.length) ||
+      Boolean(editorRef.current?.innerText.trim());
+    if (hasContent && !window.confirm('Discard this message?')) return;
+    setComposing(false);
+    resetComposeFields();
+    setMessage('Draft discarded.');
   }
 
   function payload(): MailPayload | null {
@@ -257,16 +596,20 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     }
     const signatureFile = includeSignature ? splitDataUrl(signature) : null;
     const withSignature = signatureFile
-      ? (html.includes('cid:signature@uwezo') ? html : `${html}<p><img src="cid:signature@uwezo" alt="Signature" style="max-width:240px"></p>`)
+      ? html.includes('cid:signature@uwezo')
+        ? html
+        : `${html}<p><img src="cid:signature@uwezo" alt="Signature" style="max-width:240px"></p>`
       : html;
     return {
       to: to.trim(),
       cc: cc.trim(),
+      bcc: bcc.trim(),
       subject: subject.trim(),
       html: withSignature,
       attachments,
       signature: signatureFile,
       origId: origId || undefined,
+      replyType: replyType || undefined,
     };
   }
 
@@ -285,12 +628,7 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     }
     setMessage(draft ? 'Draft saved.' : attachments.length ? 'Message sent with attachments.' : 'Message sent.');
     setComposing(false);
-    setTo('');
-    setCc('');
-    setSubject('');
-    setOrigId('');
-    setAttachments([]);
-    if (editorRef.current) editorRef.current.innerHTML = '';
+    resetComposeFields();
     if (draft) setFolder('drafts');
     else void loadFolder(folder);
   }
@@ -303,7 +641,8 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     setBusy(true);
     setError('');
     const op = folder === 'deleted' ? 'delete' : 'trash';
-    const result = await tokenFor((token) => moveMail(token, ids, op));
+    const conversation = folder !== 'drafts';
+    const result = await tokenFor((token) => moveMail(token, ids, op, conversation));
     setBusy(false);
     if (!result) return;
     if (!result.ok) {
@@ -321,7 +660,8 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     if (!open) return;
     setBusy(true);
     setError('');
-    const result = await tokenFor((token) => moveMail(token, open.id, op));
+    const conversation = Boolean(open.isConversation) || folder !== 'drafts';
+    const result = await tokenFor((token) => moveMail(token, open.id, op, conversation && op !== 'delete'));
     setBusy(false);
     if (!result) return;
     if (!result.ok) {
@@ -335,10 +675,76 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     void loadFolder(folder);
   }
 
+  async function toggleStar(id: string, currentlyStarred: boolean) {
+    setBusy(true);
+    setError('');
+    const conversation = folder !== 'drafts';
+    const result = await tokenFor((token) => flagMail(token, id, !currentlyStarred, conversation));
+    setBusy(false);
+    if (!result) return;
+    if (!result.ok) {
+      setError(result.detail);
+      return;
+    }
+    setItems((current) => current.map((row) => (row.id === id ? { ...row, starred: !currentlyStarred } : row)));
+    setOpen((current) => (current && current.id === id ? { ...current, starred: !currentlyStarred } : current));
+  }
+
   async function openItem(item: MailItem) {
     setBusy(true);
     setError('');
     setPreview(null);
+    setThreadStack([]);
+
+    if (folder === 'drafts') {
+      const result = await tokenFor((token) => readMail(token, item.id));
+      setBusy(false);
+      if (!result) return;
+      if (!result.ok) {
+        setError(result.detail);
+        return;
+      }
+      const detail = parseMessageDetail(result.xml, item);
+      startCompose({
+        to: detail.to.join(', '),
+        cc: detail.cc.join(', '),
+        subject: detail.subject,
+        html: detail.html || `<p>${detail.body}</p>`,
+        origId: detail.id,
+      });
+      setMessage('Draft opened for editing.');
+      return;
+    }
+
+    if (item.isConversation) {
+      const result = await tokenFor((token) => readConversation(token, item.id));
+      setBusy(false);
+      if (!result) return;
+      if (!result.ok) {
+        setError(result.detail);
+        return;
+      }
+      const thread = parseMessages(result.xml);
+      if (!thread.length) {
+        setError('Could not load this conversation.');
+        return;
+      }
+      setThreadStack(thread);
+      const newest = thread[0];
+      setBusy(true);
+      const msg = await tokenFor((token) => readMail(token, newest.id));
+      setBusy(false);
+      if (!msg?.ok) {
+        setError(msg?.detail || 'Could not open the conversation message.');
+        return;
+      }
+      const detail = parseMessageDetail(msg.xml, newest);
+      setOpen({ ...detail, starred: item.starred || newest.starred, isConversation: true });
+      setComposing(false);
+      setItems((current) => current.map((row) => (row.id === item.id ? { ...row, unread: false } : row)));
+      return;
+    }
+
     const result = await tokenFor((token) => readMail(token, item.id));
     setBusy(false);
     if (!result) return;
@@ -346,8 +752,37 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
       setError(result.detail);
       return;
     }
-    setOpen(parseMessageDetail(result.xml, item));
+    const detail = parseMessageDetail(result.xml, item);
+    setOpen({ ...detail, starred: item.starred });
     setComposing(false);
+    setItems((current) => current.map((row) => (row.id === item.id ? { ...row, unread: false } : row)));
+  }
+
+  async function bulkAct(op: 'trash' | 'spam' | 'archive' | 'read' | 'unread' | 'flag' | '!flag') {
+    if (!selected.length) {
+      setError('Select one or more messages first.');
+      return;
+    }
+    const conversation = folder !== 'drafts';
+    setBusy(true);
+    setError('');
+    let result;
+    if (op === 'read' || op === 'unread') {
+      result = await tokenFor((token) => markMailRead(token, selected, op === 'read', conversation));
+    } else if (op === 'flag' || op === '!flag') {
+      result = await tokenFor((token) => flagMail(token, selected, op === 'flag', conversation));
+    } else {
+      result = await tokenFor((token) => moveMail(token, selected, op, conversation));
+    }
+    setBusy(false);
+    if (!result) return;
+    if (!result.ok) {
+      setError(result.detail);
+      return;
+    }
+    setMessage(`${selected.length} conversation(s) updated.`);
+    setSelected([]);
+    void loadFolder(folder);
   }
 
   async function openAttachment(part: MailPart) {
@@ -362,14 +797,12 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
     }
     let result = await fetchAttachment(current.token, open.id, part.part);
     if (result.authFailed) {
-      const signed = await signInMailbox(current.email, current.password);
-      if (!signed.ok) {
+      const refreshed = await refreshMailToken(current);
+      if (!refreshed) {
         setBusy(false);
-        setError(signed.message);
         return;
       }
-      storeMail({ email: signed.email, token: signed.token, password: signed.password }, signed.passwordReset);
-      result = await fetchAttachment(signed.token, open.id, part.part);
+      result = await fetchAttachment(refreshed.token, open.id, part.part);
     }
     setBusy(false);
     if (!result.ok) {
@@ -448,124 +881,397 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
 
   if (!mail) {
     return (
-      <form className="account-form" onSubmit={(event) => void connect(event)}>
-        <h2>Mailbox</h2>
-        <p className="home-chat-note">
-          This sign-in did not open the mailbox. Enter the mail.govmail.ke password for this address. It stays connected until you log out.
-        </p>
-        <label>
-          Mailbox
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@uwezo.go.ke" />
-        </label>
-        <label>
-          Password
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-        </label>
-        {error ? <p className="lms-note">{error}</p> : null}
-        <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Opening…' : 'Open mailbox'}</button>
-      </form>
+      <div className="gmail-shell">
+        <header className="gmail-topbar">
+          <div className="gmail-search-pill">
+            <span className="gmail-menu-icon" aria-hidden>
+              <IcMenu />
+            </span>
+            <span className="gmail-search-placeholder">Search in mail</span>
+          </div>
+        </header>
+        <div className="gmail-connect">
+          {connecting || busy ? (
+            <p className="gmail-status">Opening mailbox for {staff.email}…</p>
+          ) : (
+            <>
+              <h2>Mail</h2>
+              <p>
+                {staff.authVia === 'lms' || staff.eboardVerified
+                  ? 'Mail opens for this same address so you can read and send as yourself.'
+                  : 'Enter the mail.govmail.ke password if needed, or open the mailbox for this address.'}
+              </p>
+              {error ? <p className="gmail-error">{error}</p> : null}
+              <button
+                type="button"
+                className="gmail-primary-btn"
+                disabled={connecting}
+                onClick={() =>
+                  void connectMailbox(
+                    staff.email,
+                    staff.mail?.password || '',
+                    staff.authVia === 'lms' || Boolean(staff.eboardVerified) || !staff.mail?.password,
+                  )
+                }
+              >
+                Open my mailbox
+              </button>
+              <form className="gmail-connect-form" onSubmit={(event) => void connect(event)}>
+                <label>
+                  Mailbox
+                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@uwezo.go.ke" />
+                </label>
+                <label>
+                  Password (optional)
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                </label>
+                <button type="submit" className="gmail-text-btn" disabled={connecting}>
+                  Open with mailbox password
+                </button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
     );
   }
 
   const folderLabel = MAIL_FOLDERS.find((item) => item.id === folder)?.label || 'Inbox';
-  const allSelected = items.length > 0 && items.every((item) => selected.includes(item.id));
+  const filtered = items;
+  const selecting = selected.length > 0;
 
   return (
-    <div className="account-form">
-      <h2>{mail.email}</h2>
-      <div className="mail-folders">
-        {MAIL_FOLDERS.map((item) => (
-          <button key={item.id} type="button" className={item.id === folder ? 'btn-primary' : 'btn-ghost'} onClick={() => { setFolder(item.id); setOpen(null); setPreview(null); setComposing(false); }}>
-            {item.label}
+    <div className="gmail-shell">
+      {drawerOpen ? (
+        <button type="button" className="gmail-drawer-backdrop" aria-label="Close menu" onClick={() => setDrawerOpen(false)} />
+      ) : null}
+      <aside className={`gmail-drawer ${drawerOpen ? 'is-open' : ''}`}>
+        <div className="gmail-drawer-brand">
+          <span className="gmail-brand-mark">M</span>
+          <div>
+            <strong>Mail</strong>
+            <small>{mail.email}</small>
+          </div>
+        </div>
+        {mail.via === 'delegate' || staff.authVia === 'lms' || staff.eboardVerified ? (
+          <p className="gmail-drawer-note">Opened for this signed-in session</p>
+        ) : null}
+        <nav className="gmail-drawer-nav">
+          {MAIL_FOLDERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={item.id === folder ? 'is-active' : ''}
+              onClick={() => {
+                setFolder(item.id);
+                setOpen(null);
+                setPreview(null);
+                setComposing(false);
+                setSettings(false);
+                setDrawerOpen(false);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setSettings(true);
+              setComposing(false);
+              setOpen(null);
+              setDrawerOpen(false);
+            }}
+          >
+            Signature
           </button>
-        ))}
-      </div>
-      <div className="doc-actions">
-        <button type="button" className="btn-ghost" onClick={() => startCompose()}>New message</button>
-        <button type="button" className="btn-ghost" onClick={() => { setSettings((openSettings) => !openSettings); setComposing(false); setOpen(null); setPreview(null); }}>Signature</button>
-        <button type="button" className="btn-ghost" disabled={busy || (!selected.length && !open)} onClick={() => void removeIds(selected.length ? selected : open ? [open.id] : [])}>
-          Delete selected
-        </button>
-      </div>
-      {message ? <p className="lms-note">{message}</p> : null}
-      {error ? <p className="lms-note">{error}</p> : null}
+        </nav>
+      </aside>
+
+      {!composing ? (
+        <header className="gmail-topbar">
+          {selecting ? (
+            <div className="gmail-select-bar">
+              <button type="button" className="gmail-icon-btn" onClick={() => setSelected([])} aria-label="Clear selection">
+                <IcBack />
+              </button>
+              <strong>{selected.length}</strong>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void bulkAct('archive')} aria-label="Archive">
+                <IcArchive />
+              </button>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void bulkAct('spam')} aria-label="Spam">
+                <IcSpam />
+              </button>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void removeIds(selected)} aria-label="Delete">
+                <IcDelete />
+              </button>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void bulkAct('read')} aria-label="Mark read">
+                <IcCheck />
+              </button>
+              <button type="button" className="gmail-text-btn" disabled={busy} onClick={() => void bulkAct('unread')}>
+                Unread
+              </button>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void bulkAct('flag')} aria-label="Star">
+                <IcStar filled />
+              </button>
+            </div>
+          ) : (
+            <form className="gmail-search-pill" onSubmit={(event) => void runSearch(event)}>
+              <button type="button" className="gmail-icon-btn" onClick={() => setDrawerOpen(true)} aria-label="Open menu">
+                <IcMenu />
+              </button>
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={`Search in ${folderLabel}`}
+                aria-label="Search mail"
+              />
+              <button type="submit" className="gmail-text-btn" disabled={busy}>
+                Search
+              </button>
+              {searchApplied ? (
+                <button
+                  type="button"
+                  className="gmail-text-btn"
+                  onClick={() => {
+                    setSearch('');
+                    setSearchApplied('');
+                    void loadFolder(folder, mail, { searchText: '', offset: 0 });
+                  }}
+                >
+                  Clear
+                </button>
+              ) : (
+                <span className="gmail-avatar gmail-avatar--sm" style={{ background: avatarColor(mail.email) }}>
+                  {avatarLetter(mail.email)}
+                </span>
+              )}
+            </form>
+          )}
+        </header>
+      ) : null}
+
+      {message ? <p className="gmail-toast">{message}</p> : null}
+      {error ? <p className="gmail-error gmail-error--banner">{error}</p> : null}
+
       {settings ? (
-        <div className="mail-read">
+        <div className="gmail-pane">
+          <button type="button" className="gmail-text-btn" onClick={() => setSettings(false)}>
+            ← Back
+          </button>
           <h3>Signature</h3>
-          <p className="home-chat-note">Upload a picture. It is added when you send a message from this phone.</p>
-          {signature ? <img src={signature} alt="Signature" style={{ maxWidth: 220 }} /> : <p>No signature saved.</p>}
-          <label className="btn-ghost">
+          <p className="gmail-muted">Upload a picture. It is added when you send a message from this phone.</p>
+          {signature ? <img src={signature} alt="Signature" className="gmail-signature-img" /> : <p className="gmail-muted">No signature saved.</p>}
+          <label className="gmail-text-btn">
             Upload signature
-            <input type="file" accept="image/*" onChange={(event) => void chooseSignature(event.target.files?.[0] || null)} />
+            <input type="file" accept="image/*" hidden onChange={(event) => void chooseSignature(event.target.files?.[0] || null)} />
           </label>
-          {signature ? <button type="button" className="btn-ghost" onClick={() => { saveSignature(mail.email, ''); setSignature(''); }}>Remove signature</button> : null}
+          {signature ? (
+            <button
+              type="button"
+              className="gmail-text-btn"
+              onClick={() => {
+                saveSignature(mail.email, '');
+                setSignature('');
+              }}
+            >
+              Remove signature
+            </button>
+          ) : null}
         </div>
       ) : null}
+
       {composing ? (
-        <form className="account-form" onSubmit={(event) => void submitMail(event, false)}>
-          <label>To<input type="text" value={to} onChange={(event) => setTo(event.target.value)} placeholder="name@example.com, other@example.com" /></label>
-          <label>Cc<input type="text" value={cc} onChange={(event) => setCc(event.target.value)} placeholder="optional" /></label>
-          <label>Subject<input value={subject} onChange={(event) => setSubject(event.target.value)} /></label>
-          <div className="mail-toolbar">
-            <button type="button" className="btn-ghost" onClick={() => format('bold')}>Bold</button>
-            <button type="button" className="btn-ghost" onClick={() => format('italic')}>Italic</button>
-            <button type="button" className="btn-ghost" onClick={() => format('underline')}>Underline</button>
-            <select aria-label="Font" defaultValue="" onChange={(event) => { format('fontName', event.target.value); event.target.value = ''; }}>
-              <option value="" disabled>Font</option>
-              {FONTS.map((font) => <option key={font} value={font}>{font}</option>)}
-            </select>
-            <select aria-label="Font size" defaultValue="" onChange={(event) => { format('fontSize', event.target.value); event.target.value = ''; }}>
-              <option value="" disabled>Size</option>
-              {SIZES.map((size) => <option key={size.value} value={size.value}>{size.label}</option>)}
-            </select>
-            <label>
-              Colour
-              <input type="color" aria-label="Font colour" defaultValue="#1a1a1a" onChange={(event) => format('foreColor', event.target.value)} />
-            </label>
+        <form className="gmail-compose" onSubmit={(event) => void submitMail(event, false)}>
+          <div className="gmail-compose-bar">
+            <button type="button" className="gmail-icon-btn" onClick={discardCompose} aria-label="Close">
+              <IcClose />
+            </button>
+            <div className="gmail-compose-bar-actions">
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={(event) => void submitMail(event, true)} aria-label="Save draft">
+                <span className="gmail-compose-draft-label">Draft</span>
+              </button>
+              <button type="button" className="gmail-icon-btn" disabled={busy} onClick={discardCompose} aria-label="Discard">
+                <IcDelete />
+              </button>
+              <button type="submit" className="gmail-send-icon" disabled={busy} aria-label="Send">
+                <IcSend />
+              </button>
+            </div>
           </div>
-          <p className="home-chat-note">Select text, then choose a font, size, or colour. Attachments are uploaded to mail.govmail.ke so the recipient receives them.</p>
-          <div ref={editorRef} className="mail-editor" contentEditable role="textbox" aria-label="Message" />
-          <label className="btn-ghost">
-            Attach files
-            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip" onChange={(event) => void addAttachments(event.target.files)} />
-          </label>
+
+          <ChipField
+            label="To"
+            value={to}
+            onChange={setTo}
+            placeholder="Recipients"
+            trailing={
+              !showCc || !showBcc ? (
+                <span className="gmail-compose-cc-toggles">
+                  {!showCc ? (
+                    <button type="button" className="gmail-text-btn" onClick={() => setShowCc(true)}>
+                      Cc
+                    </button>
+                  ) : null}
+                  {!showBcc ? (
+                    <button type="button" className="gmail-text-btn" onClick={() => setShowBcc(true)}>
+                      Bcc
+                    </button>
+                  ) : null}
+                </span>
+              ) : null
+            }
+          />
+          {showCc ? <ChipField label="Cc" value={cc} onChange={setCc} placeholder="Cc" /> : null}
+          {showBcc ? <ChipField label="Bcc" value={bcc} onChange={setBcc} placeholder="Bcc" /> : null}
+
+          <div className="gmail-compose-field gmail-compose-subject">
+            <input
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              placeholder="Subject"
+              aria-label="Subject"
+            />
+          </div>
+
+          <div className="gmail-toolbar">
+            <button type="button" className="gmail-format-btn" onClick={() => format('bold')} aria-label="Bold">
+              <strong>B</strong>
+            </button>
+            <button type="button" className="gmail-format-btn" onClick={() => format('italic')} aria-label="Italic">
+              <em>I</em>
+            </button>
+            <button type="button" className="gmail-format-btn" onClick={() => format('underline')} aria-label="Underline">
+              <span style={{ textDecoration: 'underline' }}>U</span>
+            </button>
+            <select
+              aria-label="Font"
+              defaultValue=""
+              onChange={(event) => {
+                format('fontName', event.target.value);
+                event.target.value = '';
+              }}
+            >
+              <option value="" disabled>
+                Font
+              </option>
+              {FONTS.map((font) => (
+                <option key={font} value={font}>
+                  {font}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Font size"
+              defaultValue=""
+              onChange={(event) => {
+                format('fontSize', event.target.value);
+                event.target.value = '';
+              }}
+            >
+              <option value="" disabled>
+                Size
+              </option>
+              {SIZES.map((size) => (
+                <option key={size.value} value={size.value}>
+                  {size.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div ref={editorRef} className="gmail-editor" contentEditable role="textbox" aria-label="Message" />
+
           {attachments.length ? (
             <div className="mail-attach-list">
               {attachments.map((file) => (
                 <div className="mail-attach-row" key={`${file.name}-${file.base64.slice(0, 12)}`}>
                   <span>{file.name}</span>
-                  <button type="button" className="btn-ghost" onClick={() => setAttachments((current) => current.filter((item) => item !== file))}>Remove</button>
+                  <button type="button" className="gmail-text-btn" onClick={() => setAttachments((current) => current.filter((item) => item !== file))}>
+                    Remove
+                  </button>
                 </div>
               ))}
             </div>
           ) : null}
-          <label className="lms-check">
-            <input type="checkbox" checked={includeSignature} onChange={(event) => setIncludeSignature(event.target.checked)} />
-            Include signature
-          </label>
-          {includeSignature && signature ? <img src={signature} alt="Signature" style={{ maxWidth: 220 }} /> : null}
-          <button type="submit" className="btn-primary" disabled={busy}>{busy ? 'Sending…' : 'Send'}</button>
-          <button type="button" className="btn-ghost" disabled={busy} onClick={(event) => void submitMail(event, true)}>Save draft</button>
-          <button type="button" className="btn-ghost" onClick={() => { setComposing(false); setOrigId(''); }}>Cancel</button>
+
+          <div className="gmail-compose-footer">
+            <button type="button" className="gmail-icon-btn" onClick={() => fileInputRef.current?.click()} aria-label="Attach files">
+              <IcAttach />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"
+              onChange={(event) => void addAttachments(event.target.files)}
+            />
+            <label className="gmail-sig-check">
+              <input type="checkbox" checked={includeSignature} onChange={(event) => setIncludeSignature(event.target.checked)} />
+              Signature
+            </label>
+            <button type="button" className="gmail-text-btn" disabled={busy} onClick={(event) => void submitMail(event, true)}>
+              Save draft
+            </button>
+          </div>
         </form>
       ) : null}
+
       {open && !composing ? (
-        <article className="mail-read">
+        <article className="gmail-read">
+          <div className="gmail-read-bar">
+            <button type="button" className="gmail-icon-btn" onClick={() => { setOpen(null); setPreview(null); }} aria-label="Back">
+              <IcBack />
+            </button>
+            <div className="gmail-read-bar-spacer" />
+            <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void act('archive')} aria-label="Archive">
+              <IcArchive />
+            </button>
+            <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void removeIds([open.id])} aria-label="Delete">
+              <IcDelete />
+            </button>
+            <button type="button" className="gmail-icon-btn" disabled={busy} onClick={() => void act('spam')} aria-label="Report spam">
+              <IcSpam />
+            </button>
+            <button
+              type="button"
+              className={`gmail-icon-btn ${open.starred ? 'is-starred' : ''}`}
+              disabled={busy}
+              onClick={() => void toggleStar(open.id, Boolean(open.starred))}
+              aria-label={open.starred ? 'Unstar' : 'Star'}
+            >
+              <IcStar filled={Boolean(open.starred)} />
+            </button>
+          </div>
           <h3>{open.subject}</h3>
-          <p className="home-chat-note">
-            From {open.from || 'unknown'}
-            {open.to.length ? ` · To ${open.to.join(', ')}` : ''}
-            {open.cc.length ? ` · Cc ${open.cc.join(', ')}` : ''}
-            {open.date ? ` · ${open.date}` : ''}
-          </p>
-          <div className="mail-body" dangerouslySetInnerHTML={{ __html: cleanHtml(open.html || `<p>${open.body}</p>`) }} />
+          <div className="gmail-read-meta">
+            <span className="gmail-avatar" style={{ background: avatarColor(open.from) }}>
+              {avatarLetter(open.from)}
+            </span>
+            <div>
+              <strong>{displayName(open.from)}</strong>
+              <small>{open.from}</small>
+              <small>
+                to {open.to.join(', ') || 'me'}
+                {open.cc.length ? ` · cc ${open.cc.join(', ')}` : ''}
+              </small>
+            </div>
+            <time>{open.date}</time>
+          </div>
+          <div className="mail-body gmail-body" dangerouslySetInnerHTML={{ __html: cleanHtml(open.html || `<p>${open.body}</p>`) }} />
           {open.attachments.length ? (
             <div className="mail-attach-list">
               <h4>Attachments</h4>
               {open.attachments.map((part) => (
                 <div className="mail-attach-row" key={part.part}>
-                  <span>{part.name}{part.size ? ` · ${sizeLabel(part.size)}` : ''}</span>
-                  <button type="button" className="btn-ghost" disabled={busy} onClick={() => void openAttachment(part)}>Preview</button>
+                  <span>
+                    {part.name}
+                    {part.size ? ` · ${sizeLabel(part.size)}` : ''}
+                  </span>
+                  <button type="button" className="gmail-text-btn" disabled={busy} onClick={() => void openAttachment(part)}>
+                    Preview
+                  </button>
                 </div>
               ))}
             </div>
@@ -577,56 +1283,146 @@ export function MailBox({ onPasswordReset }: MailBoxProps) {
                 <img src={preview.url} alt={preview.name} />
               ) : preview.type === 'application/pdf' ? (
                 <iframe title={preview.name} src={preview.url} className="mail-pdf-preview" />
-              ) : preview.type.startsWith('text/') ? (
-                <pre className="mail-text-preview">{(() => {
-                  try {
-                    const binary = atob(preview.base64);
-                    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-                    return new TextDecoder().decode(bytes);
-                  } catch {
-                    return 'This text attachment is ready to download.';
-                  }
-                })()}</pre>
               ) : (
-                <p className="home-chat-note">Preview is not available for this file type. Download it to open on the phone.</p>
+                <p className="gmail-muted">Preview is not available for this file type. Download it to open on the phone.</p>
               )}
               <div className="doc-actions">
-                <button type="button" className="btn-primary" disabled={busy} onClick={() => void downloadPreview()}>Download</button>
-                <button type="button" className="btn-ghost" onClick={() => setPreview(null)}>Close preview</button>
+                <button type="button" className="gmail-primary-btn" disabled={busy} onClick={() => void downloadPreview()}>
+                  Download
+                </button>
+                <button type="button" className="gmail-text-btn" onClick={() => setPreview(null)}>
+                  Close preview
+                </button>
               </div>
             </div>
           ) : null}
-          <div className="doc-actions">
-            <button type="button" className="btn-primary" disabled={busy} onClick={() => startReply(open, false)}>Reply</button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => startReply(open, true)}>Reply all</button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act('archive')}>Archive</button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void act('spam')}>Spam</button>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => void removeIds([open.id])}>
-              {folder === 'deleted' ? 'Delete' : 'Deleted'}
+          <div className="gmail-reply-row">
+            <button type="button" className="gmail-outline-btn" disabled={busy} onClick={() => startReply(open, false)}>
+              <IcReply /> Reply
             </button>
-            <button type="button" className="btn-ghost" onClick={() => { setOpen(null); setPreview(null); }}>Back to {folderLabel}</button>
+            <button type="button" className="gmail-outline-btn" disabled={busy} onClick={() => startReply(open, true)}>
+              <IcReplyAll /> Reply all
+            </button>
+            <button type="button" className="gmail-outline-btn" disabled={busy} onClick={() => void startForward(open)}>
+              <IcForward /> Forward
+            </button>
+            <button
+              type="button"
+              className="gmail-text-btn"
+              disabled={busy}
+              onClick={() =>
+                void tokenFor((token) => markMailRead(token, open.id, false, Boolean(open.isConversation))).then((result) => {
+                  if (!result) return;
+                  if (!result.ok) setError(result.detail);
+                  else {
+                    setMessage('Marked unread.');
+                    setItems((current) => current.map((row) => (row.id === open.id ? { ...row, unread: true } : row)));
+                    setOpen(null);
+                  }
+                })
+              }
+            >
+              Mark unread
+            </button>
           </div>
+          {threadStack.length > 1 ? (
+            <div className="gmail-thread-stack" style={{ marginTop: '1rem' }}>
+              <h4>Conversation ({threadStack.length})</h4>
+              {threadStack.map((msg) => (
+                <button
+                  key={msg.id}
+                  type="button"
+                  className={`gmail-row ${msg.id === open.id ? 'is-selected' : ''} ${msg.unread ? 'is-unread' : ''}`}
+                  style={{ width: '100%' }}
+                  disabled={busy}
+                  onClick={() => void openItem({ ...msg, isConversation: false })}
+                >
+                  <span className="gmail-row-copy">
+                    <span className="gmail-row-top">
+                      <strong>{displayName(msg.from || msg.to)}</strong>
+                      <time>{msg.whenShort || msg.date}</time>
+                    </span>
+                    <span className="gmail-row-preview">{msg.preview || msg.subject}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </article>
       ) : null}
+
       {!open && !composing && !settings ? (
-        <>
-          {items.length ? (
-            <label className="lms-check">
-              <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? [] : items.map((item) => item.id))} />
-              Select all
-            </label>
-          ) : null}
-          {items.length ? items.map((item) => (
-            <div className="mail-row" key={item.id}>
-              <input type="checkbox" aria-label={`Select ${item.subject}`} checked={selected.includes(item.id)} onChange={() => toggle(item.id)} />
-              <button type="button" className="application-card" onClick={() => void openItem(item)}>
-                <strong>{item.subject}</strong>
-                <span>{item.from || item.to}{item.date ? ` · ${item.date}` : ''}</span>
-                {item.preview ? <span>{item.preview}</span> : null}
-              </button>
-            </div>
-          )) : <p className="home-chat-note">{busy ? 'Loading mail…' : `No messages in ${folderLabel}.`}</p>}
-        </>
+        <div className="gmail-list">
+          <div className="gmail-list-heading">
+            <h2>
+              {folderLabel}
+              {searchApplied ? ` · “${searchApplied}”` : ''}
+            </h2>
+            <button type="button" className="gmail-text-btn" disabled={busy} onClick={() => void loadFolder(folder)}>
+              {busy ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+          {filtered.length ? (
+            <>
+              {filtered.map((item) => (
+                <div className={`gmail-row ${item.unread ? 'is-unread' : ''} ${selected.includes(item.id) ? 'is-selected' : ''}`} key={item.id}>
+                  <button type="button" className="gmail-check" aria-label={`Select ${item.subject}`} onClick={() => toggle(item.id)}>
+                    {selected.includes(item.id) ? <IcCheck /> : <IcUncheck />}
+                  </button>
+                  <button type="button" className="gmail-row-main" onClick={() => void openItem(item)}>
+                    <span className="gmail-avatar" style={{ background: avatarColor(item.from || item.to) }}>
+                      {avatarLetter(item.from || item.to)}
+                    </span>
+                    <span className="gmail-row-copy">
+                      <span className="gmail-row-top">
+                        <strong>
+                          {displayName(item.from || item.to)}
+                          {item.threadCount && item.threadCount > 1 ? ` (${item.threadCount})` : ''}
+                        </strong>
+                        <time>{item.whenShort || item.date}</time>
+                      </span>
+                      <span className="gmail-row-subject">{item.subject}</span>
+                      <span className="gmail-row-preview">
+                        {item.hasAttachment ? (
+                          <span className="gmail-attach-mark">
+                            <IcPaperclip />
+                          </span>
+                        ) : null}
+                        {item.preview || ' '}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`gmail-star-btn ${item.starred ? 'is-starred' : ''}`}
+                    aria-label={item.starred ? 'Unstar' : 'Star'}
+                    disabled={busy}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void toggleStar(item.id, item.starred);
+                    }}
+                  >
+                    <IcStar filled={item.starred} />
+                  </button>
+                </div>
+              ))}
+              {hasMoreMail ? (
+                <button type="button" className="gmail-outline-btn" style={{ margin: '0.75rem' }} disabled={busy} onClick={() => void loadMoreMail()}>
+                  {busy ? 'Loading…' : 'Load more'}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <p className="gmail-empty">{busy ? 'Loading mail…' : `No messages in ${folderLabel}.`}</p>
+          )}
+        </div>
+      ) : null}
+
+      {!composing && !open ? (
+        <button type="button" className="gmail-fab" onClick={() => startCompose()} aria-label="Compose">
+          <IcEdit />
+          Compose
+        </button>
       ) : null}
     </div>
   );
