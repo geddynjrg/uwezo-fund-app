@@ -17,6 +17,7 @@ import {
   type OfflinePacket,
   type OfflineProduct,
   type StoredFile,
+  packetStatusLabel,
 } from '../lib/offlineApply';
 import type { PortalId } from '../lib/portalStatus';
 import { constituencyChoices, countyChoices, wardChoices } from '../lib/locations';
@@ -323,6 +324,19 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
           if (!ready.termsSent) await sendTermsNotices(ready);
         }
       }
+      if (product === 'core') {
+        const loansUp = await probeOrigin(LINKS.loans.url);
+        if (loansUp) {
+          const needCodes = ready.members.filter(
+            (member) => member.name.trim() && member.phone.trim() && member.consentStatus === 'none',
+          );
+          if (needCodes.length) {
+            const delivery = await sendMemberConsents(ready);
+            ready = { ...ready, members: delivery.members };
+            // Soft: do not block save if codes were not verified — sync path can finish confirmation.
+          }
+        }
+      }
       const packet = await createPacket(ready, files, editingId);
       const sent = await pushPacket(packet);
       const number = sent.acknowledgementNumber || sent.applicationId || sent.payload.proposedNumber;
@@ -333,7 +347,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
       setMessage(
         sent.status === 'synced'
           ? `Accepted. Application number ${number}.`
-          : `Saved on this phone as ${number}. ${sent.lastError || 'It will be sent when Majuu is back. If MSEA is down at that time, Majuu still accepts it for checking in the LMS.'}`,
+          : `Saved on this phone as ${number}. ${sent.lastError || 'It will sync when loans/LMS are reachable.'}`,
       );
       const rows = await listPackets();
       setSaved(rows.filter((row) => row.product === product));
@@ -1178,8 +1192,8 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
         {title === 'Member confirmation' ? (
           <div className="account-form">
             <p className="home-chat-note">
-              When the portal is reachable, member confirmation codes are sent to this Uwezo Fund app and by SMS
-              through EBIS Cloud. While the portal is down, confirm the list here and the codes are requested on sync.
+              Confirm the member list now. OTP/SMS codes can be sent here when the phone is online, or later when this
+              application syncs to loans/LMS. You can continue the remaining steps offline even if SMS is unavailable.
             </p>
             <label className="account-check">
               <input
@@ -1189,6 +1203,62 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               />
               The named members are correct
             </label>
+            {product === 'core'
+              ? draft.members
+                  .filter((member) => member.name.trim())
+                  .map((member) => {
+                    const index = draft.members.indexOf(member);
+                    return (
+                      <fieldset className="offline-member" key={index}>
+                        <legend>{member.name}</legend>
+                        <p className="home-chat-note">
+                          {member.consentStatus === 'verified'
+                            ? 'Consent verified'
+                            : member.consentStatus === 'sent'
+                              ? 'Code sent. Enter the code from the member when available.'
+                              : 'Consent code not sent yet (optional until sync).'}
+                        </p>
+                        {member.consentStatus !== 'verified' ? (
+                          <label>
+                            Consent code
+                            <input
+                              inputMode="numeric"
+                              value={member.consentInput}
+                              onChange={(event) => {
+                                const consentInput = event.target.value;
+                                const consentStatus =
+                                  member.consentCode && consentInput.trim() === member.consentCode
+                                    ? 'verified'
+                                    : member.consentStatus;
+                                setMember(index, { consentInput, consentStatus });
+                              }}
+                            />
+                          </label>
+                        ) : null}
+                      </fieldset>
+                    );
+                  })
+              : null}
+            {product === 'core' ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void sendMemberConsents().then((result) => {
+                    setBusy(false);
+                    setRegistryNote(
+                      result.sent
+                        ? `Consent codes sent to ${result.sent} member${result.sent === 1 ? '' : 's'}.`
+                        : 'EBIS could not send codes now. Finish the form offline; codes can be sent when you sync online.',
+                    );
+                  });
+                }}
+              >
+                {busy ? 'Sending codes…' : 'Send consent codes (optional now)'}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -1538,25 +1608,35 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                 <strong>{packet.payload.groupName || 'Application'}</strong>
                 <span className="home-chat-note">
                   {packet.acknowledgementNumber || packet.applicationId || packet.payload.proposedNumber} ·{' '}
-                  {packet.status === 'synced' ? 'Sent' : packet.lastError || 'Waiting for the site'}
+                  {packetStatusLabel(packet)}
                 </span>
-                {packet.status !== 'synced' && packet.product === 'majuu' ? (
+                {packet.status !== 'synced' ? (
                   <button
                     type="button"
                     className="btn-ghost"
                     onClick={() => {
                       setDraft({
-                        ...emptyDraft('majuu'),
+                        ...emptyDraft(packet.product),
                         ...packet.payload,
                         members: (packet.payload.members || []).map((member) => ({ ...emptyMember(), ...member })),
                       });
                       setFiles(packet.files);
                       setEditingId(packet.id);
-                      setStep(MAJUU_STEPS.indexOf('Loan Amount'));
-                      setMessage('Enter consent codes if members have received them, then save again.');
+                      setStep(
+                        packet.product === 'majuu'
+                          ? MAJUU_STEPS.indexOf('Loan Amount')
+                          : packet.status === 'draft'
+                            ? 0
+                            : LOAN_STEPS.indexOf('Member confirmation'),
+                      );
+                      setMessage(
+                        packet.status === 'draft'
+                          ? 'This application was returned to the group. Correct it and submit again.'
+                          : 'Continue the saved application, then save to sync.',
+                      );
                     }}
                   >
-                    Continue saved application
+                    {packet.status === 'draft' ? 'Edit returned draft' : 'Continue saved application'}
                   </button>
                 ) : null}
               </div>

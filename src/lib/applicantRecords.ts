@@ -1,6 +1,13 @@
 import type { ApplicantRecords, ApplicantTable } from './applicantVault';
 import { deleteMajuu, emptyGroup, emptyIndividual, listMajuu, saveMajuu } from './majuuApply';
-import { deletePacket, emptyDraft, listPackets, savePacket, type OfflinePacket } from './offlineApply';
+import {
+  deletePacket,
+  emptyDraft,
+  listPackets,
+  reopenReturnedPackets,
+  savePacket,
+  type OfflinePacket,
+} from './offlineApply';
 import type { AppSession } from './session';
 
 function cell(row: Record<string, string> | undefined, key: string): string {
@@ -121,32 +128,41 @@ export async function publishApplicantRecords(records: ApplicantRecords): Promis
   }
   const applications = table(records.loans, 'applications');
   const loanGroups = table(records.loans, 'group_data');
+  const reopenHints: { applicationId?: string; status?: string; action?: string }[] = [];
   for (const application of applications) {
     const id = cell(application, 'id');
     if (!id) continue;
     const data = loanGroups.find((row) => cell(row, 'applicationId') === id);
     const number = cell(application, 'applicationId') || id;
+    const status = cell(application, 'status');
+    const action = cell(application, 'action');
     numbers.push(number);
+    reopenHints.push({ applicationId: number, status, action });
+    const returned =
+      /defer|returned|draft/i.test(status) || /returned_to_applicant|return/i.test(action);
     const packet: OfflinePacket = {
       id: `server:loans:${id}`,
       product: 'core',
       createdAt: cell(application, 'createdAt') || new Date().toISOString(),
-      status: 'synced',
+      status: returned ? 'draft' : 'synced',
       payload: {
         ...emptyDraft('core'),
+        proposedNumber: number,
         groupName: cell(data, 'groupName'),
         registrationNumber: cell(data, 'groupRegistrationNumber'),
         contactPhone: cell(data, 'contactPhone'),
         loanAmount: cell(data, 'loanAmount'),
       },
       files: [],
-      lastError: '',
+      lastError: returned ? 'Returned to the group for correction. Edit and submit again.' : '',
       applicationId: number,
       acknowledgementNumber: number,
-      syncedAt: new Date().toISOString(),
+      syncedAt: returned ? undefined : new Date().toISOString(),
+      remoteStatus: status || action || '',
     };
     await savePacket(packet);
   }
+  await reopenReturnedPackets(reopenHints);
   return numbers;
 }
 

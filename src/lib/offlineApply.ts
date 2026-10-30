@@ -178,13 +178,16 @@ export type OfflinePacket = {
   id: string;
   product: OfflineProduct;
   createdAt: string;
-  status: 'pending' | 'synced';
+  /** pending = waiting to upload; synced = accepted online; draft = returned for correction */
+  status: 'pending' | 'synced' | 'draft';
   payload: ApplicationDraft;
   files: StoredFile[];
   lastError: string;
   applicationId?: string;
   acknowledgementNumber?: string;
   syncedAt?: string;
+  /** LMS / portal status when last reconciled (e.g. deferred, returned). */
+  remoteStatus?: string;
 };
 
 const DB_NAME = 'uwezo-offline-applications';
@@ -538,7 +541,7 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
   if (!online) {
     const waiting: OfflinePacket = {
       ...packet,
-      status: 'pending',
+      status: packet.status === 'draft' ? 'draft' : 'pending',
       lastError: `${origin} is unreachable. Kept on this phone.`,
     };
     await savePacket(waiting);
@@ -550,6 +553,9 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
   body.set('product', packet.product);
   body.set('proposedNumber', packet.payload.proposedNumber);
   body.set('payload', JSON.stringify(packet.payload));
+  if (packet.product === 'core') {
+    body.set('lmsPayload', JSON.stringify(packetToLmsPayload(packet)));
+  }
   for (const file of packet.files) {
     const field = file.memberIndex === undefined ? `file:${file.slot}` : `file:${file.slot}:${file.memberIndex}`;
     body.set(
@@ -570,12 +576,14 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
       message?: string;
       applicationId?: string;
       acknowledgementNumber?: string;
+      ok?: boolean;
+      success?: boolean;
     };
     if (response.status === 404) {
       const waiting: OfflinePacket = {
         ...packet,
-        status: 'pending',
-        lastError: 'Saved on this phone. The portal does not have /api/sync/applications yet.',
+        status: packet.status === 'draft' ? 'draft' : 'pending',
+        lastError: 'Saved on this phone. Waiting for /api/sync/applications on the portal.',
       };
       await savePacket(waiting);
       return waiting;
@@ -583,7 +591,7 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
     if (!response.ok) {
       const failed: OfflinePacket = {
         ...packet,
-        status: 'pending',
+        status: packet.status === 'draft' ? 'draft' : 'pending',
         lastError: data.errors?.join(' ') || data.message || `Portal returned ${response.status}.`,
       };
       await savePacket(failed);
@@ -592,17 +600,19 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
     const synced: OfflinePacket = {
       ...packet,
       status: 'synced',
-      applicationId: data.applicationId || '',
-      acknowledgementNumber: data.acknowledgementNumber || '',
+      applicationId: data.applicationId || packet.payload.proposedNumber || '',
+      acknowledgementNumber:
+        data.acknowledgementNumber || data.applicationId || packet.payload.proposedNumber || '',
       syncedAt: new Date().toISOString(),
       lastError: '',
+      remoteStatus: 'submitted',
     };
     await savePacket(synced);
     return synced;
   } catch (error) {
     const waiting: OfflinePacket = {
       ...packet,
-      status: 'pending',
+      status: packet.status === 'draft' ? 'draft' : 'pending',
       lastError: error instanceof Error ? error.message : 'Could not reach the portal. Kept on this phone.',
     };
     await savePacket(waiting);
@@ -612,8 +622,119 @@ export async function pushPacket(packet: OfflinePacket): Promise<OfflinePacket> 
 
 export async function syncPending(): Promise<OfflinePacket[]> {
   const packets = await listPackets();
-  const pending = packets.filter((packet) => packet.status !== 'synced');
+  const pending = packets.filter((packet) => packet.status === 'pending' || packet.status === 'draft');
   const results: OfflinePacket[] = [];
   for (const packet of pending) results.push(await pushPacket(packet));
   return results;
+}
+
+/** Map app draft → LMS api/v1/application JSON (files as data-URLs when present). */
+export function packetToLmsPayload(packet: OfflinePacket): Record<string, unknown> {
+  const d = packet.payload;
+  const fileDataUrl = (slot: string, memberIndex?: number) => {
+    const file = packet.files.find(
+      (f) => f.slot === slot && (memberIndex === undefined ? f.memberIndex === undefined : f.memberIndex === memberIndex),
+    );
+    if (!file) return null;
+    const bytes = new Uint8Array(file.buffer);
+    let binary = '';
+    for (const b of bytes) binary += String.fromCharCode(b);
+    const b64 = btoa(binary);
+    return {
+      name: file.name || slot,
+      type: file.type || 'application/octet-stream',
+      content: `data:${file.type || 'application/octet-stream'};base64,${b64}`,
+    };
+  };
+  return {
+    application_id: d.proposedNumber || packet.acknowledgementNumber || packet.id,
+    status: 'submitted',
+    identifier_type: 'PHONE',
+    owner_identifier: d.contactPhone,
+    phone_number: d.contactPhone,
+    group_name: d.groupName,
+    group_registration_number: d.registrationNumber,
+    date_registered: d.registrationDate || new Date().toISOString().slice(0, 10),
+    county: d.county,
+    constituency: d.constituency,
+    ward: d.ward,
+    meeting_point: d.meetingPoint,
+    nearest_landmark: d.nearestLandmark,
+    nature_of_group: d.natureOfGroup || 'youth',
+    group_registration_certificate: fileDataUrl('registrationCertificate'),
+    list_of_members_certificate: fileDataUrl('memberList'),
+    group_meeting_minutes: fileDataUrl('minutes'),
+    loan_type: d.loanType,
+    loan_amount: Number(d.loanAmount) || 0,
+    proposed_repayment_period: Number(d.repaymentPeriod) || 12,
+    bank_name: d.bankName,
+    institution_type: d.institutionType,
+    bank_branch: d.bankBranch,
+    bank_account_number: d.bankAccount,
+    nature_of_business: d.natureOfBusiness,
+    business_type: d.businessType ? [d.businessType] : [],
+    years_in_operation: Number(d.yearsInBusiness) || 0,
+    average_income: Number(d.averageIncome) || 0,
+    group_members: d.members
+      .filter((m) => m.name.trim())
+      .map((m, index) => ({
+        name: m.name,
+        id_number: m.nationalId,
+        gender: String(m.gender || '').toLowerCase() || 'other',
+        phone_number: m.phone,
+        position: m.position,
+        economic_activity: m.economicActivity,
+        photo_member_id: fileDataUrl('photoOfId', index),
+        confirmation_status:
+          m.consentStatus === 'verified' ? 'confirmed' : m.consentStatus === 'sent' ? 'sent' : 'pending',
+        confirmation_token: m.consentCode || null,
+      })),
+    source: 'uwezo-fund-app',
+    client_packet_id: packet.id,
+  };
+}
+
+/**
+ * When LMS marks an application deferred/returned to the group, reopen the matching
+ * local packet as an editable draft (not locked synced).
+ */
+export async function reopenReturnedPackets(
+  remoteRows: { applicationId?: string; status?: string; action?: string }[],
+): Promise<number> {
+  const packets = await listPackets();
+  let changed = 0;
+  for (const remote of remoteRows) {
+    const status = String(remote.status || '').toLowerCase();
+    const action = String(remote.action || '').toLowerCase();
+    const returned =
+      /defer|returned|draft/.test(status) || /returned_to_applicant|return/.test(action);
+    if (!returned) continue;
+    const appId = String(remote.applicationId || '').trim();
+    if (!appId) continue;
+    const match = packets.find(
+      (p) =>
+        p.product === 'core' &&
+        (p.applicationId === appId ||
+          p.acknowledgementNumber === appId ||
+          p.payload.proposedNumber === appId ||
+          p.id === appId),
+    );
+    if (!match) continue;
+    if (match.status === 'draft' && match.remoteStatus === status) continue;
+    await savePacket({
+      ...match,
+      status: 'draft',
+      remoteStatus: status || action || 'returned',
+      lastError: 'Returned to the group for correction. Edit and submit again.',
+      syncedAt: undefined,
+    });
+    changed += 1;
+  }
+  return changed;
+}
+
+export function packetStatusLabel(packet: OfflinePacket): string {
+  if (packet.status === 'synced') return 'Sent';
+  if (packet.status === 'draft') return packet.lastError || 'Returned — edit and resubmit';
+  return packet.lastError || 'Waiting to sync';
 }

@@ -27,7 +27,7 @@ type HomeProps = {
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.2.6';
+const PACKAGE_VERSION = '1.2.7';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -175,8 +175,8 @@ export function Home({
             {link.id === 'loans' || link.id === 'majuu' ? (
               <span className="link-card__sub">
                 {portals[link.id] === false
-                  ? 'The site is not answering. This phone still uses its own application steps.'
-                  : 'Uses the application steps saved in this app.'}
+                  ? 'Always uses this app’s application steps. The site is offline — drafts stay on the phone until sync works.'
+                  : 'Always uses this app’s application steps. You can finish offline; submit syncs when the site and LMS are reachable.'}
               </span>
             ) : null}
           </button>

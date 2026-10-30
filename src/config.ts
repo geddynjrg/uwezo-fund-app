@@ -9,7 +9,7 @@ export const LINKS = {
   loans: {
     id: 'loans',
     title: 'Loan application',
-    subtitle: 'Group loan steps saved in this app',
+    subtitle: 'Apply in-app — works offline, syncs when online',
     url: 'https://loans.uwezo.go.ke',
   },
   loansStaging: {

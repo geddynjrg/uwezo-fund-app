@@ -20,6 +20,7 @@ import {
 } from './lmsLocalDb';
 import { loadStaffSession } from './staffSession';
 import { probeOrigin } from './portalStatus';
+import { reopenReturnedPackets } from './offlineApply';
 
 export type SyncResult = { ok: boolean; detail: string; meta?: LmsLocalMeta | null };
 
@@ -122,11 +123,21 @@ export async function pullLmsSnapshot(email: string): Promise<SyncResult> {
     counts,
     tables,
   });
+  const phaseApps = (tables.phase_applications || []) as Record<string, unknown>[];
+  const reopened = await reopenReturnedPackets(
+    phaseApps.map((row) => ({
+      applicationId: String(row.application_number || row.application_id || row.id || ''),
+      status: String(row.status || ''),
+      action: String(row.action || ''),
+    })),
+  );
   const meta = await loadLmsMeta(email);
   const parts = LMS_TABLES.map((name) => `${name} ${counts[name] ?? 0}`).join(', ');
   return {
     ok: true,
-    detail: `Saved ${json.constituencyName || 'constituency'} LMS tables on this phone (${parts}).`,
+    detail: `Saved ${json.constituencyName || 'constituency'} LMS tables on this phone (${parts}).${
+      reopened ? ` Reopened ${reopened} returned loan draft(s) for editing.` : ''
+    }`,
     meta,
   };
 }
