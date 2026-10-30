@@ -25,6 +25,7 @@ import { probeOrigin, type PortalId } from '../lib/portalStatus';
 import { cacheHasFigures, fetchOfficerProfile, fetchStaffRole, lmsHostOnline, loadLmsCache, openLmsFromZimbra, rememberMappedMenu, roleLabel, saveLmsCache, syncLmsMailbox, type LmsRole, type OfficerProfile } from '../lib/lmsSync';
 import { openApplicantCopy, sealApplicantCopy } from '../lib/applicantVault';
 import { clearPublishedRecords, publishApplicantRecords, pullApplicantRecords, recordsNote } from '../lib/applicantRecords';
+import { MyApplications } from './MyApplications';
 import { officerCopyStatus, openOfficerCopy, sealOfficerCopy } from '../lib/officerVault';
 import { getLastEboardProbeStatus, openEboardHome, probeEboardLogin } from '../lib/eboard';
 import { loadStaffSession, saveStaffSession, type MailLink, type StaffAuthVia } from '../lib/staffSession';
@@ -106,9 +107,18 @@ type AccountAuthProps = {
   onSessionChange?: (session: AppSession | null) => void;
   onContinueOffline?: (portal: PortalId) => void;
   onOpenLms?: (officer: OfficerOpenPayload) => void;
+  onOpenLoanPacket?: (packet: import('../lib/offlineApply').OfflinePacket) => void;
+  onOpenMajuuRecord?: (record: import('../lib/majuuApply').MajuuRecord) => void;
 };
 
-export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpenLms }: AccountAuthProps) {
+export function AccountAuth({
+  onBack,
+  onSessionChange,
+  onContinueOffline,
+  onOpenLms,
+  onOpenLoanPacket,
+  onOpenMajuuRecord,
+}: AccountAuthProps) {
   const [mode, setMode] = useState<Mode>('menu');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -257,7 +267,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
         session: next,
         records,
       });
-      const numbers = await publishApplicantRecords(records);
+      const numbers = await publishApplicantRecords(records, next);
       setRecordNote(recordsNote(numbers));
     } catch {
       setRecordNote('');
@@ -554,8 +564,8 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
     const copy = await openApplicantCopy(emailNorm, passwordValue);
     if (!copy) return false;
     if (phoneValue && copy.phone && !sameKenyanLine(phoneValue, copy.phone)) return false;
-    const numbers = await publishApplicantRecords(copy.records);
     const next = { ...copy.session, remainSignedIn, phone: phoneValue || copy.session.phone, email: emailNorm };
+    const numbers = await publishApplicantRecords(copy.records, next);
     saveSession(next);
     clearPendingLogin();
     applySession(next);
@@ -956,7 +966,7 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
         session: next,
         records,
       });
-      const numbers = await publishApplicantRecords(records);
+      const numbers = await publishApplicantRecords(records, next);
       setRecordNote(recordsNote(numbers));
       applySession(next);
       setMode('signed_in');
@@ -1115,8 +1125,11 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
 
         {mode === 'signed_in' && session ? (
           <div className="chat-success">
+            <div className="home-session-row">
+              <span className="home-signed-pill">Signed in</span>
+            </div>
             <p>
-              Signed in as <strong>{session.email}</strong>
+              <strong>{session.email}</strong>
               {'\n'}
               Phone: {session.phone}
             </p>
@@ -1131,6 +1144,14 @@ export function AccountAuth({ onBack, onSessionChange, onContinueOffline, onOpen
                 .map((item) => item.replace(/^https:\/\//, ''))
                 .join(', ')}
             </p>
+            {onOpenLoanPacket && onOpenMajuuRecord ? (
+              <MyApplications
+                session={session}
+                compact
+                onOpenLoan={onOpenLoanPacket}
+                onOpenMajuu={onOpenMajuuRecord}
+              />
+            ) : null}
             <div className="chat-success__actions">
               {session.eboardVerified ? (
                 <button

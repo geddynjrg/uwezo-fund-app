@@ -15,6 +15,23 @@ function cell(row: Record<string, string> | undefined, key: string): string {
   return value == null ? '' : String(value);
 }
 
+function firstCell(row: Record<string, string> | undefined, keys: string[]): string {
+  for (const key of keys) {
+    const value = cell(row, key);
+    if (value) return value;
+  }
+  return '';
+}
+
+function dateOnly(value: string): string {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = Date.parse(text);
+  if (Number.isNaN(parsed)) return '';
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
 function genderOf(value: string): '' | 'Male' | 'Female' {
   if (value === 'Male' || value === 'Female') return value;
   return '';
@@ -22,6 +39,15 @@ function genderOf(value: string): '' | 'Male' | 'Female' {
 
 function table(tables: ApplicantTable[], name: string): Record<string, string>[] {
   return tables.find((item) => item.name === name)?.rows || [];
+}
+
+function ownerStamp(session?: AppSession | null): { ownerEmail: string; ownerPhone: string } {
+  return {
+    ownerEmail: String(session?.email || '')
+      .trim()
+      .toLowerCase(),
+    ownerPhone: String(session?.phone || '').trim(),
+  };
 }
 
 async function readJson(url: string, headers: Record<string, string>): Promise<{ tables: ApplicantTable[]; loansTables: ApplicantTable[] }> {
@@ -73,8 +99,12 @@ export async function clearPublishedRecords(): Promise<void> {
   }
 }
 
-export async function publishApplicantRecords(records: ApplicantRecords): Promise<string[]> {
+export async function publishApplicantRecords(
+  records: ApplicantRecords,
+  session?: AppSession | null,
+): Promise<string[]> {
   await clearPublishedRecords();
+  const owner = ownerStamp(session);
   const numbers: string[] = [];
   const groups = table(records.majuu, 'group_applications');
   const groupData = table(records.majuu, 'group_data');
@@ -96,6 +126,8 @@ export async function publishApplicantRecords(records: ApplicantRecords): Promis
       status: 'complete',
       uploadedToMajuu: true,
       serverApplicationId: id,
+      ownerEmail: owner.ownerEmail,
+      ownerPhone: owner.ownerPhone,
     });
   }
   for (const person of people) {
@@ -124,15 +156,21 @@ export async function publishApplicantRecords(records: ApplicantRecords): Promis
       status: 'numbered',
       uploadedToMajuu: true,
       serverApplicationId: id,
+      ownerEmail: owner.ownerEmail,
+      ownerPhone: owner.ownerPhone,
     });
   }
   const applications = table(records.loans, 'applications');
   const loanGroups = table(records.loans, 'group_data');
+  const loanConditions = table(records.loans, 'loan_conditions');
+  const proposedBusiness = table(records.loans, 'proposed_business');
   const reopenHints: { applicationId?: string; status?: string; action?: string }[] = [];
   for (const application of applications) {
     const id = cell(application, 'id');
     if (!id) continue;
     const data = loanGroups.find((row) => cell(row, 'applicationId') === id);
+    const conditions = loanConditions.find((row) => cell(row, 'applicationId') === id);
+    const business = proposedBusiness.find((row) => cell(row, 'applicationId') === id);
     const number = cell(application, 'applicationId') || id;
     const status = cell(application, 'status');
     const action = cell(application, 'action');
@@ -148,10 +186,42 @@ export async function publishApplicantRecords(records: ApplicantRecords): Promis
       payload: {
         ...emptyDraft('core'),
         proposedNumber: number,
-        groupName: cell(data, 'groupName'),
-        registrationNumber: cell(data, 'groupRegistrationNumber'),
-        contactPhone: cell(data, 'contactPhone'),
-        loanAmount: cell(data, 'loanAmount'),
+        groupName: firstCell(data, ['groupName']),
+        registrationNumber: firstCell(data, ['groupRegistrationNumber', 'registrationNumber']),
+        registrationDate: dateOnly(firstCell(data, ['dateFormed', 'registrationDate'])),
+        county: firstCell(data, ['countyOfOperation', 'county']),
+        constituency: cell(data, 'constituency'),
+        ward: cell(data, 'ward'),
+        meetingPoint: cell(data, 'meetingPoint'),
+        nearestLandmark: cell(data, 'nearestLandmark'),
+        groupPurpose: firstCell(data, ['purposeOfTheGroup', 'groupPurpose']),
+        groupActivities: firstCell(data, ['keyActivitiesOfTheGroup', 'groupActivities']),
+        valueChain: cell(data, 'valueChain'),
+        groupOther: firstCell(data, ['other', 'groupOther']),
+        tableBankingExperience: cell(data, 'tableBankingExperience'),
+        tableBankingShareContribution: cell(data, 'tableBankingShareContribution'),
+        tableBankingTotalLoanedOut: cell(data, 'tableBankingTotalLoanedOut'),
+        tableBankingTotalRevolvingFund: cell(data, 'tableBankingTotalRevolvingFund'),
+        contactPhone:
+          firstCell(data, ['contactPhone', 'phoneNumber', 'phone']) ||
+          firstCell(application, ['phone', 'phoneNumber', 'contactPhone']) ||
+          owner.ownerPhone,
+        natureOfGroup: firstCell(conditions, ['natureOfTheGroup', 'natureOfGroup']),
+        loanType: firstCell(conditions, ['loanType']) || 'Wezesha',
+        loanAmount: firstCell(conditions, ['loanAmount']) || firstCell(data, ['loanAmount']),
+        repaymentPeriod: firstCell(conditions, ['repaymentPeriod']),
+        institutionType: firstCell(conditions, ['institutionType']),
+        bankName: firstCell(conditions, ['bankName', 'bankNameOther']),
+        bankBranch: firstCell(conditions, ['bankBranch']),
+        bankAccount: firstCell(conditions, ['accountNumber', 'bankAccount']),
+        natureOfBusiness: firstCell(business, ['natureOfBusiness']),
+        businessType: firstCell(business, ['businessType']),
+        yearsInBusiness: firstCell(business, ['yearsInBusiness']),
+        averageIncome: firstCell(business, ['averageIncome']),
+        costOfGoods: firstCell(business, ['costOfGoods']),
+        rentForBusiness: firstCell(business, ['rentForBusiness']),
+        salaries: firstCell(business, ['salaries']),
+        transportForBusinessStock: firstCell(business, ['transportForBusinessStock']),
       },
       files: [],
       lastError: returned ? 'Returned to the group for correction. Edit and submit again.' : '',
@@ -159,6 +229,8 @@ export async function publishApplicantRecords(records: ApplicantRecords): Promis
       acknowledgementNumber: number,
       syncedAt: returned ? undefined : new Date().toISOString(),
       remoteStatus: status || action || '',
+      ownerEmail: owner.ownerEmail,
+      ownerPhone: owner.ownerPhone,
     };
     await savePacket(packet);
   }

@@ -10,8 +10,10 @@ import {
   fileSlots,
   MAJUU_MEMBER_FILE_SLOTS,
   listPackets,
+  otpConsentSummary,
   pushPacket,
   validateDraft,
+  validateLoanStep,
   type ApplicationDraft,
   type FileSlot,
   type OfflinePacket,
@@ -19,6 +21,7 @@ import {
   type StoredFile,
   packetStatusLabel,
 } from '../lib/offlineApply';
+import { guidanceForLoanStep } from '../lib/applicationGuidance';
 import type { PortalId } from '../lib/portalStatus';
 import { constituencyChoices, countyChoices, wardChoices } from '../lib/locations';
 import {
@@ -40,7 +43,15 @@ import { MajuuApplicationList } from './MajuuApply';
 type OfflineApplyProps = {
   portal: PortalId;
   onBack: () => void;
+  openPacketId?: string;
 };
+
+function formatBytes(size: number): string {
+  if (!(size > 0)) return '0 B';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const PRODUCT: Record<PortalId, OfflineProduct> = {
   loans: 'core',
@@ -78,7 +89,7 @@ function stepsFor(product: OfflineProduct) {
   return product === 'majuu' ? MAJUU_STEPS : LOAN_STEPS;
 }
 
-export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
+export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps) {
   const product = PRODUCT[portal];
   const link = portal === 'majuu' ? LINKS.majuu : LINKS.loans;
   const steps = stepsFor(product);
@@ -87,6 +98,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
   const [files, setFiles] = useState<StoredFile[]>([]);
   const [saved, setSaved] = useState<OfflinePacket[]>([]);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [agencies, setAgencies] = useState<AgencyHit[]>([]);
@@ -95,6 +107,35 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
   const [mseaReason, setMseaReason] = useState('');
   const [bankBranches, setBankBranches] = useState<BankBranches>({});
   const [editingId, setEditingId] = useState('');
+  const [readOnly, setReadOnly] = useState(false);
+
+  function loadPacket(packet: OfflinePacket, asReadOnly = false) {
+    setDraft({
+      ...emptyDraft(packet.product),
+      ...packet.payload,
+      members: (packet.payload.members || []).map((member) => ({ ...emptyMember(), ...member })),
+    });
+    setFiles(packet.files);
+    setEditingId(asReadOnly ? '' : packet.id);
+    setReadOnly(asReadOnly);
+    setStep(
+      asReadOnly
+        ? stepsFor(packet.product).length - 1
+        : packet.product === 'majuu'
+          ? MAJUU_STEPS.indexOf('Loan Amount')
+          : packet.status === 'draft'
+            ? 0
+            : LOAN_STEPS.indexOf('Member confirmation'),
+    );
+    setFieldErrors([]);
+    setMessage(
+      asReadOnly
+        ? 'Synced application summary (read-only). Start a new draft to apply again.'
+        : packet.status === 'draft'
+          ? 'This application was returned to the group. Correct it and submit again.'
+          : 'Continue the saved application, then save to sync.',
+    );
+  }
 
   useEffect(() => {
     if (product !== 'majuu') return;
@@ -112,6 +153,20 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
   useEffect(() => {
     void listPackets().then((rows) => setSaved(rows.filter((row) => row.product === product)));
   }, [product]);
+
+  useEffect(() => {
+    if (!openPacketId) return;
+    let cancelled = false;
+    void listPackets().then((rows) => {
+      if (cancelled) return;
+      const packet = rows.find((row) => row.id === openPacketId);
+      if (!packet) return;
+      loadPacket(packet, packet.status === 'synced');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openPacketId]);
 
   useEffect(() => {
     if (product !== 'majuu' || steps[step] !== 'Bank Account') return;
@@ -343,6 +398,8 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
       setDraft(emptyDraft(product));
       setFiles([]);
       setEditingId('');
+      setReadOnly(false);
+      setFieldErrors([]);
       setStep(0);
       setMessage(
         sent.status === 'synced'
@@ -361,6 +418,8 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
   const title = steps[step];
   const last = step === steps.length - 1;
   const number = draft.proposedNumber || 'Assigned when you save';
+  const guidance = product === 'core' ? guidanceForLoanStep(title) : null;
+  const otpSummary = product === 'core' ? otpConsentSummary(draft) : null;
 
   return (
     <div className="chat">
@@ -373,9 +432,35 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
           <strong>{link.title}</strong>
           <span>
             Step {step + 1} of {steps.length}: {title}
+            {readOnly ? ' · Read-only' : ''}
           </span>
         </div>
       </header>
+
+      {product === 'core' ? (
+        <nav className="apply-stepper" aria-label="Application steps">
+          {steps.map((label, index) => (
+            <button
+              key={label}
+              type="button"
+              className={`apply-stepper__chip${
+                index === step ? ' apply-stepper__chip--current' : index < step ? ' apply-stepper__chip--done' : ''
+              }`}
+              disabled={readOnly ? index !== step && index !== steps.length - 1 : index > step}
+              onClick={() => {
+                if (readOnly) {
+                  setStep(index === steps.length - 1 || index <= step ? index : step);
+                  return;
+                }
+                if (index <= step) setStep(index);
+              }}
+              title={label}
+            >
+              {index + 1}
+            </button>
+          ))}
+        </nav>
+      ) : null}
 
       <form className="chat-thread" onSubmit={(event) => void onSubmit(event)}>
         <p className="home-chat-note">
@@ -386,6 +471,32 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
         {message ? <div className="bubble bubble--bot">{message}</div> : null}
         {error ? <div className="bubble bubble--system">{error}</div> : null}
         {registryNote ? <div className="bubble bubble--bot">{registryNote}</div> : null}
+        {fieldErrors.length ? (
+          <div className="apply-field-errors" role="alert">
+            <strong>Fix before continuing</strong>
+            <ul>
+              {fieldErrors.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {guidance ? (
+          <aside className="apply-guidance">
+            <h3>{guidance.title} — prepare</h3>
+            <ul>
+              {guidance.prepare.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+            <h3>Common mistakes</h3>
+            <ul>
+              {guidance.commonMistakes.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </aside>
+        ) : null}
 
         {title === 'Group data' || title === 'Group Information' ? (
           <div className="account-form">
@@ -401,7 +512,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   Verify your MSEA registration number to auto-populate group details. Only the group chair listed
                   on the MSEA partners list can continue this group application; other members use individual applications.
                 </p>
-                <button type="button" className="btn-ghost" disabled={busy} onClick={() => void runMseaLookup()}>
+                <button type="button" className="btn-ghost" disabled={busy || readOnly} onClick={() => void runMseaLookup()}>
                   {busy ? 'Verifying...' : 'Verify & Populate'}
                 </button>
                 {draft.mseaStatus !== 'found' ? (
@@ -409,11 +520,13 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                 ) : null}
               </>
             ) : null}
+            <div className="apply-section">
+              <h3>Basics</h3>
             <label>
               Group name
               <input
                 value={draft.groupName}
-                readOnly={product === 'majuu' && mseaReachable === true}
+                readOnly={readOnly || (product === 'majuu' && mseaReachable === true)}
                 onChange={(event) => setDraft({ ...draft, groupName: event.target.value })}
               />
             </label>
@@ -422,7 +535,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               <input
                 value={draft.registrationNumber}
                 placeholder={product === 'majuu' ? 'e.g. RA-NNSRDM' : ''}
-                readOnly={product === 'majuu' && mseaReachable === true && draft.mseaStatus === 'found'}
+                readOnly={readOnly || (product === 'majuu' && mseaReachable === true && draft.mseaStatus === 'found')}
                 onChange={(event) =>
                   setDraft({
                     ...draft,
@@ -436,14 +549,18 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               <input
                 type="date"
                 value={draft.registrationDate}
-                readOnly={product === 'majuu' && mseaReachable === true}
+                readOnly={readOnly || (product === 'majuu' && mseaReachable === true)}
                 onChange={(event) => setDraft({ ...draft, registrationDate: event.target.value })}
               />
             </label>
+            </div>
+            <div className="apply-section">
+              <h3>Location</h3>
             <label>
               County
               <select
                 value={draft.county}
+                disabled={readOnly}
                 onChange={(event) =>
                   setDraft({ ...draft, county: event.target.value, constituency: '', ward: '' })
                 }
@@ -460,7 +577,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               Constituency
               <select
                 value={draft.constituency}
-                disabled={!draft.county}
+                disabled={readOnly || !draft.county}
                 onChange={(event) => setDraft({ ...draft, constituency: event.target.value, ward: '' })}
               >
                 <option value="">{draft.county ? 'Choose constituency' : 'Choose a county first'}</option>
@@ -475,7 +592,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               Ward
               <select
                 value={draft.ward}
-                disabled={!draft.constituency}
+                disabled={readOnly || !draft.constituency}
                 onChange={(event) => setDraft({ ...draft, ward: event.target.value })}
               >
                 <option value="">{draft.constituency ? 'Choose ward' : 'Choose a constituency first'}</option>
@@ -616,11 +733,13 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                 ) : null}
               </>
             ) : null}
+            </div>
             {product === 'majuu' && mseaReachable && draft.mseaPhones ? (
               <label>
                 Contact phone
                 <select
                   value={draft.contactPhone}
+                  disabled={readOnly}
                   onChange={(event) => setDraft({ ...draft, contactPhone: event.target.value })}
                 >
                   <option value="">Choose a phone from MSEA</option>
@@ -638,16 +757,19 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   value={draft.contactPhone}
                   inputMode="tel"
                   placeholder="07XXXXXXXX"
+                  readOnly={readOnly}
                   onChange={(event) => setDraft({ ...draft, contactPhone: event.target.value })}
                 />
               </label>
             )}
             {product === 'core' ? (
-              <>
+              <div className="apply-section">
+                <h3>Background</h3>
                 <label>
                   Meeting point
                   <input
                     value={draft.meetingPoint}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, meetingPoint: event.target.value })}
                   />
                 </label>
@@ -655,6 +777,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   Nearest landmark
                   <input
                     value={draft.nearestLandmark}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, nearestLandmark: event.target.value })}
                   />
                 </label>
@@ -663,6 +786,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   <textarea
                     rows={3}
                     value={draft.groupPurpose}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, groupPurpose: event.target.value })}
                   />
                 </label>
@@ -671,22 +795,32 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   <textarea
                     rows={3}
                     value={draft.groupActivities}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, groupActivities: event.target.value })}
                   />
                 </label>
                 <label>
                   Value chain
-                  <input value={draft.valueChain} onChange={(event) => setDraft({ ...draft, valueChain: event.target.value })} />
+                  <input
+                    value={draft.valueChain}
+                    readOnly={readOnly}
+                    onChange={(event) => setDraft({ ...draft, valueChain: event.target.value })}
+                  />
                 </label>
                 <label>
                   Other activity
-                  <input value={draft.groupOther} onChange={(event) => setDraft({ ...draft, groupOther: event.target.value })} />
+                  <input
+                    value={draft.groupOther}
+                    readOnly={readOnly}
+                    onChange={(event) => setDraft({ ...draft, groupOther: event.target.value })}
+                  />
                 </label>
                 <label>
                   Years of table banking
                   <input
                     inputMode="numeric"
                     value={draft.tableBankingExperience}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, tableBankingExperience: event.target.value })}
                   />
                 </label>
@@ -695,6 +829,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   <input
                     inputMode="numeric"
                     value={draft.tableBankingShareContribution}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, tableBankingShareContribution: event.target.value })}
                   />
                 </label>
@@ -703,6 +838,7 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   <input
                     inputMode="numeric"
                     value={draft.tableBankingTotalLoanedOut}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, tableBankingTotalLoanedOut: event.target.value })}
                   />
                 </label>
@@ -711,20 +847,23 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   <input
                     inputMode="numeric"
                     value={draft.tableBankingTotalRevolvingFund}
+                    readOnly={readOnly}
                     onChange={(event) => setDraft({ ...draft, tableBankingTotalRevolvingFund: event.target.value })}
                   />
                 </label>
-                <label className="btn-ghost">
-                  Group credit history (optional)
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
-                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                      void onFile('groupCreditHistory', event.target.files)
-                    }
-                  />
-                </label>
-              </>
+                {!readOnly ? (
+                  <label className="btn-ghost">
+                    Group credit history (optional)
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
+                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                        void onFile('groupCreditHistory', event.target.files)
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -1195,6 +1334,16 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               Confirm the member list now. OTP/SMS codes can be sent here when the phone is online, or later when this
               application syncs to loans/LMS. You can continue the remaining steps offline even if SMS is unavailable.
             </p>
+            {otpSummary ? (
+              <div className="otp-badges" aria-label="Member OTP status">
+                <span className="otp-badge otp-badge--ok">{otpSummary.verified} verified</span>
+                <span className="otp-badge otp-badge--sent">{otpSummary.sent} awaiting code</span>
+                <span className="otp-badge otp-badge--none">{otpSummary.none} not sent</span>
+                <span className="otp-badge">
+                  {otpSummary.verified}/{otpSummary.total || 0} responded
+                </span>
+              </div>
+            ) : null}
             <label className="account-check">
               <input
                 type="checkbox"
@@ -1477,27 +1626,41 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
               return (
                 <div className="offline-member" key={slot.slot}>
                   <strong>{slot.label}</strong>
-                  <div className="doc-actions">
-                    <label className="btn-ghost">
-                      Take picture
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={(event: ChangeEvent<HTMLInputElement>) => void onFile(slot.slot, event.target.files)}
-                      />
-                    </label>
-                    <span>or</span>
-                    <label className="btn-ghost">
-                      Choose file
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
-                        onChange={(event: ChangeEvent<HTMLInputElement>) => void onFile(slot.slot, event.target.files)}
-                      />
-                    </label>
-                  </div>
-                  {chosen ? <span className="home-chat-note">{chosen.name}</span> : null}
+                  {!readOnly ? (
+                    <div className="doc-actions">
+                      <label className="btn-ghost">
+                        {chosen ? 'Replace picture' : 'Take picture'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => void onFile(slot.slot, event.target.files)}
+                        />
+                      </label>
+                      <span>or</span>
+                      <label className="btn-ghost">
+                        {chosen ? 'Replace file' : 'Choose file'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
+                          onChange={(event: ChangeEvent<HTMLInputElement>) => void onFile(slot.slot, event.target.files)}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                  {chosen ? (
+                    <div className="upload-meta">
+                      <strong>{chosen.name}</strong>
+                      <span className="home-chat-note">{formatBytes(chosen.buffer.byteLength)}</span>
+                      {!readOnly ? (
+                        <button type="button" className="btn-ghost" onClick={() => void onFile(slot.slot, null)}>
+                          Clear
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="home-chat-note">No file yet</span>
+                  )}
                 </div>
               );
             })}
@@ -1513,31 +1676,49 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                         return (
                           <div key={slot.slot}>
                             <span>{slot.label}</span>
-                            <div className="doc-actions">
-                              <label className="btn-ghost">
-                                Take picture
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  capture="environment"
-                                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                    void onFile(slot.slot, event.target.files, index)
-                                  }
-                                />
-                              </label>
-                              <span>or</span>
-                              <label className="btn-ghost">
-                                Choose file
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
-                                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                    void onFile(slot.slot, event.target.files, index)
-                                  }
-                                />
-                              </label>
-                            </div>
-                            {chosen ? <span className="home-chat-note">{chosen.name}</span> : null}
+                            {!readOnly ? (
+                              <div className="doc-actions">
+                                <label className="btn-ghost">
+                                  {chosen ? 'Replace picture' : 'Take picture'}
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    capture="environment"
+                                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                      void onFile(slot.slot, event.target.files, index)
+                                    }
+                                  />
+                                </label>
+                                <span>or</span>
+                                <label className="btn-ghost">
+                                  {chosen ? 'Replace file' : 'Choose file'}
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
+                                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                      void onFile(slot.slot, event.target.files, index)
+                                    }
+                                  />
+                                </label>
+                              </div>
+                            ) : null}
+                            {chosen ? (
+                              <div className="upload-meta">
+                                <strong>{chosen.name}</strong>
+                                <span className="home-chat-note">{formatBytes(chosen.buffer.byteLength)}</span>
+                                {!readOnly ? (
+                                  <button
+                                    type="button"
+                                    className="btn-ghost"
+                                    onClick={() => void onFile(slot.slot, null, index)}
+                                  >
+                                    Clear
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="home-chat-note">No file yet</span>
+                            )}
                           </div>
                         );
                       })}
@@ -1570,19 +1751,36 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
             <p>
               {draft.groupName || 'Group'} · {draft.registrationNumber || 'No registration number'}
             </p>
-            <button type="submit" className="btn-primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Save on this phone'}
-            </button>
+            {product === 'core' ? (
+              <p className="home-chat-note">
+                {draft.county || '—'} / {draft.constituency || '—'} / {draft.ward || '—'} · Loan{' '}
+                {draft.loanType || '—'} {draft.loanAmount || '—'}
+              </p>
+            ) : null}
+            {!readOnly ? (
+              <button type="submit" className="btn-primary" disabled={busy}>
+                {busy ? 'Saving…' : 'Save on this phone'}
+              </button>
+            ) : (
+              <p className="home-chat-note">This synced application is view-only on this phone.</p>
+            )}
           </div>
         ) : null}
 
         <div className="doc-actions">
           {step > 0 ? (
-            <button type="button" className="btn-ghost" onClick={() => setStep(step - 1)}>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setFieldErrors([]);
+                setStep(step - 1);
+              }}
+            >
               Back
             </button>
           ) : null}
-          {!last ? (
+          {!last && !readOnly ? (
             <button
               type="button"
               className="btn-primary"
@@ -1591,6 +1789,15 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   setError('Verify a registered group before continuing.');
                   return;
                 }
+                if (product === 'core') {
+                  const nextErrors = validateLoanStep(title, draft, files);
+                  if (nextErrors.length) {
+                    setFieldErrors(nextErrors);
+                    setError(nextErrors[0]);
+                    return;
+                  }
+                }
+                setFieldErrors([]);
                 setError('');
                 setStep(step + 1);
               }}
@@ -1610,35 +1817,17 @@ export function OfflineApply({ portal, onBack }: OfflineApplyProps) {
                   {packet.acknowledgementNumber || packet.applicationId || packet.payload.proposedNumber} ·{' '}
                   {packetStatusLabel(packet)}
                 </span>
-                {packet.status !== 'synced' ? (
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    onClick={() => {
-                      setDraft({
-                        ...emptyDraft(packet.product),
-                        ...packet.payload,
-                        members: (packet.payload.members || []).map((member) => ({ ...emptyMember(), ...member })),
-                      });
-                      setFiles(packet.files);
-                      setEditingId(packet.id);
-                      setStep(
-                        packet.product === 'majuu'
-                          ? MAJUU_STEPS.indexOf('Loan Amount')
-                          : packet.status === 'draft'
-                            ? 0
-                            : LOAN_STEPS.indexOf('Member confirmation'),
-                      );
-                      setMessage(
-                        packet.status === 'draft'
-                          ? 'This application was returned to the group. Correct it and submit again.'
-                          : 'Continue the saved application, then save to sync.',
-                      );
-                    }}
-                  >
-                    {packet.status === 'draft' ? 'Edit returned draft' : 'Continue saved application'}
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => loadPacket(packet, packet.status === 'synced')}
+                >
+                  {packet.status === 'synced'
+                    ? 'Open summary'
+                    : packet.status === 'draft'
+                      ? 'Edit returned draft'
+                      : 'Continue saved application'}
+                </button>
               </div>
             ))}
           </div>

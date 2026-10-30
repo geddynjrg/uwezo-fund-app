@@ -20,8 +20,8 @@ import {
 import { registerPushDevice, INBOX_ORIGINS, canonicalAuthOrigin } from './lib/appAuth';
 import { syncInbox } from './lib/inboxSync';
 import { ensureFreshSession } from './lib/keepSession';
-import { flushMajuuNotices, flushMajuuUploads } from './lib/majuuApply';
-import { syncPending } from './lib/offlineApply';
+import { flushMajuuNotices, flushMajuuUploads, type MajuuRecord } from './lib/majuuApply';
+import { syncPending, type OfflinePacket } from './lib/offlineApply';
 import { replayPendingLogin } from './lib/pendingLogin';
 import { ensureNotifyPermission } from './lib/notify';
 import { openEboardFromDeepLink } from './lib/eboard';
@@ -58,6 +58,8 @@ function officerFrom(staff: StaffSession): LmsOfficer {
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
   const [offlinePortal, setOfflinePortal] = useState<PortalId>('loans');
+  const [openLoanPacketId, setOpenLoanPacketId] = useState('');
+  const [openMajuuRecordId, setOpenMajuuRecordId] = useState('');
   const [lmsOfficer, setLmsOfficer] = useState<LmsOfficer | null>(null);
   const [staff, setStaff] = useState<StaffSession | null>(null);
   const [portals, setPortals] = useState<PortalAvailability>({ loans: null, majuu: null });
@@ -266,7 +268,21 @@ function App() {
         onBack={() => setScreen('home')}
         onSessionChange={(s) => setSession(s)}
         onContinueOffline={(portal) => {
+          setOpenLoanPacketId('');
+          setOpenMajuuRecordId('');
           setOfflinePortal(portal);
+          setScreen('offline');
+        }}
+        onOpenLoanPacket={(packet: OfflinePacket) => {
+          setOpenLoanPacketId(packet.id);
+          setOpenMajuuRecordId('');
+          setOfflinePortal('loans');
+          setScreen('offline');
+        }}
+        onOpenMajuuRecord={(record: MajuuRecord) => {
+          setOpenMajuuRecordId(record.id);
+          setOpenLoanPacketId('');
+          setOfflinePortal('majuu');
           setScreen('offline');
         }}
         onOpenLms={(officer) => {
@@ -312,9 +328,22 @@ function App() {
     return (
       <>
         {offlinePortal === 'majuu' ? (
-          <MajuuApply onBack={() => setScreen('home')} />
+          <MajuuApply
+            onBack={() => {
+              setOpenMajuuRecordId('');
+              setScreen('home');
+            }}
+            openRecordId={openMajuuRecordId || undefined}
+          />
         ) : (
-          <OfflineApply portal={offlinePortal} onBack={() => setScreen('home')} />
+          <OfflineApply
+            portal={offlinePortal}
+            onBack={() => {
+              setOpenLoanPacketId('');
+              setScreen('home');
+            }}
+            openPacketId={openLoanPacketId || undefined}
+          />
         )}
         {toastUi}
       </>
@@ -329,7 +358,21 @@ function App() {
         onOpenNotifications={() => setScreen('notifications')}
         onOpenAuthenticator={() => setScreen('authenticator')}
         onOpenOffline={(portal) => {
+          setOpenLoanPacketId('');
+          setOpenMajuuRecordId('');
           setOfflinePortal(portal);
+          setScreen('offline');
+        }}
+        onOpenLoanPacket={(packet) => {
+          setOpenLoanPacketId(packet.id);
+          setOpenMajuuRecordId('');
+          setOfflinePortal('loans');
+          setScreen('offline');
+        }}
+        onOpenMajuuRecord={(record) => {
+          setOpenMajuuRecordId(record.id);
+          setOpenLoanPacketId('');
+          setOfflinePortal('majuu');
           setScreen('offline');
         }}
         portals={portals}

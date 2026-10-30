@@ -2,7 +2,7 @@ import { LINKS } from '../config';
 import { isLikelyKenyanMobile, normalizeKenyanPhone, sameKenyanLine } from './phone';
 import type { PortalId } from './portalStatus';
 import { probeOrigin } from './portalStatus';
-import { newId } from './session';
+import { getActiveSession, newId } from './session';
 
 export type OfflineProduct = 'core' | 'majuu';
 
@@ -188,7 +188,34 @@ export type OfflinePacket = {
   syncedAt?: string;
   /** LMS / portal status when last reconciled (e.g. deferred, returned). */
   remoteStatus?: string;
+  /** Signed-in account that owns this packet (lowercased email). */
+  ownerEmail?: string;
+  ownerPhone?: string;
 };
+
+function normalizeOwnerEmail(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+function sessionOwner(): { ownerEmail: string; ownerPhone: string } {
+  const session = getActiveSession();
+  return {
+    ownerEmail: normalizeOwnerEmail(session?.email || ''),
+    ownerPhone: session?.phone ? normalizeKenyanPhone(session.phone) : '',
+  };
+}
+
+function packetMatchesAccount(packet: OfflinePacket, email: string, phone = ''): boolean {
+  const want = normalizeOwnerEmail(email);
+  if (!want) return false;
+  const owner = normalizeOwnerEmail(packet.ownerEmail || '');
+  if (owner && owner === want) return true;
+  // Legacy rows without ownerEmail: match contact phone to session phone when both present.
+  if (!owner && phone && packet.payload?.contactPhone) {
+    return sameKenyanLine(phone, packet.payload.contactPhone);
+  }
+  return false;
+}
 
 const DB_NAME = 'uwezo-offline-applications';
 const DB_VERSION = 1;
@@ -509,11 +536,16 @@ export async function createPacket(
   files: StoredFile[],
   existingId = '',
 ): Promise<OfflinePacket> {
+  const owner = sessionOwner();
+  let previous: OfflinePacket | undefined;
+  if (existingId) {
+    previous = (await listPackets()).find((row) => row.id === existingId);
+  }
   const packet: OfflinePacket = {
     id: existingId || newId(),
     product: draft.product,
-    createdAt: new Date().toISOString(),
-    status: 'pending',
+    createdAt: previous?.createdAt || new Date().toISOString(),
+    status: previous?.status === 'draft' ? 'draft' : 'pending',
     payload: {
       ...draft,
       proposedNumber: draft.proposedNumber || assignApplicationNumber(draft.product),
@@ -530,8 +562,21 @@ export async function createPacket(
     },
     files,
     lastError: '',
+    ownerEmail: owner.ownerEmail || previous?.ownerEmail || '',
+    ownerPhone: owner.ownerPhone || previous?.ownerPhone || '',
+    applicationId: previous?.applicationId,
+    acknowledgementNumber: previous?.acknowledgementNumber,
+    remoteStatus: previous?.remoteStatus,
   };
   return savePacket(packet);
+}
+
+/** Packets owned by the signed-in account (email), including legacy phone matches. */
+export async function listPacketsForAccount(email: string, phone = ''): Promise<OfflinePacket[]> {
+  const rows = await listPackets();
+  const want = normalizeOwnerEmail(email);
+  if (!want) return [];
+  return rows.filter((packet) => packet.product === 'core' && packetMatchesAccount(packet, want, phone));
 }
 
 /** Send one packet only to the portal that owns it. A repeat uses the same id. */
@@ -737,4 +782,122 @@ export function packetStatusLabel(packet: OfflinePacket): string {
   if (packet.status === 'synced') return 'Sent';
   if (packet.status === 'draft') return packet.lastError || 'Returned — edit and resubmit';
   return packet.lastError || 'Waiting to sync';
+}
+
+/** Soft per-step checks before Next (core loans). Full validateDraft still runs on save. */
+export function validateLoanStep(
+  stepTitle: string,
+  draft: ApplicationDraft,
+  files: StoredFile[],
+): string[] {
+  const errors: string[] = [];
+  const filled = draft.members.filter((member) => member.name.trim());
+  switch (stepTitle) {
+    case 'Group data':
+      if (!draft.groupName.trim()) errors.push('Group name is required.');
+      if (!draft.registrationNumber.trim()) errors.push('Registration number is required.');
+      if (!isLikelyKenyanMobile(draft.contactPhone)) {
+        errors.push('Contact phone must be a Kenyan mobile number.');
+      }
+      if (!draft.county.trim() || !draft.constituency.trim() || !draft.ward.trim()) {
+        errors.push('County, constituency, and ward are required.');
+      }
+      if (
+        !draft.meetingPoint.trim() ||
+        !draft.nearestLandmark.trim() ||
+        !draft.groupPurpose.trim() ||
+        !draft.groupActivities.trim()
+      ) {
+        errors.push('Meeting point, nearest landmark, purpose, and key activities are required.');
+      }
+      break;
+    case 'Group members': {
+      if (filled.length < 1) errors.push('Add at least one member.');
+      const ids = new Set<string>();
+      filled.forEach((member, index) => {
+        const id = member.nationalId.trim();
+        if (!/^\d{6,9}$/.test(id)) errors.push(`Member ${index + 1} needs a national ID.`);
+        else if (ids.has(id)) errors.push(`National ID ${id} is repeated.`);
+        else ids.add(id);
+        if (!member.gender) errors.push(`Member ${index + 1} needs a gender.`);
+        if (!member.position.trim()) errors.push(`Member ${index + 1} needs a position.`);
+      });
+      break;
+    }
+    case 'Loan conditions': {
+      const amount = Number(draft.loanAmount);
+      const months = Number(draft.repaymentPeriod);
+      if (draft.loanType === 'Endeleza' && (amount < 75000 || amount > 500000)) {
+        errors.push('An Endeleza loan is from 75,000 to 500,000.');
+      }
+      if (draft.loanType !== 'Endeleza' && (amount < 50000 || amount > 100000)) {
+        errors.push('A Wezesha loan is from 50,000 to 100,000.');
+      }
+      if (!(months >= 1 && months <= 24)) errors.push('Repayment period must be from 1 to 24 months.');
+      if (!draft.institutionType || !draft.bankName.trim() || !draft.bankBranch.trim() || !draft.bankAccount.trim()) {
+        errors.push('Choose a bank or SACCO and enter the branch and account.');
+      }
+      break;
+    }
+    case 'Proposed business':
+      if (!draft.natureOfBusiness.trim() || !draft.businessType.trim()) {
+        errors.push('Nature of business and business type are required.');
+      }
+      if (
+        !draft.costOfGoods.trim() ||
+        !draft.rentForBusiness.trim() ||
+        !draft.salaries.trim() ||
+        !draft.transportForBusinessStock.trim()
+      ) {
+        errors.push('Cost of goods, rent, salaries, and transport are required.');
+      }
+      break;
+    case 'Member confirmation':
+      // Soft: no hard OTP gate offline.
+      break;
+    case 'Confirmations':
+      if (
+        !draft.membersConfirmed ||
+        !draft.correctInformationConfirm ||
+        !draft.liabilityConfirm ||
+        !draft.fundsEligibleConfirm
+      ) {
+        errors.push('All four group declarations are required.');
+      }
+      break;
+    case 'Documents':
+      filled.forEach((_, index) => {
+        const hasPhoto = files.some((file) => file.slot === 'photoOfId' && file.memberIndex === index);
+        if (!hasPhoto) errors.push(`Member ${index + 1} needs a photo of their national ID.`);
+      });
+      {
+        const present = new Set(files.map((file) => file.slot));
+        fileSlots('core')
+          .filter((slot) => slot.required)
+          .forEach((slot) => {
+            if (!present.has(slot.slot)) errors.push(`${slot.label} is required.`);
+          });
+      }
+      break;
+    case 'Review':
+      return validateDraft(draft, files);
+    default:
+      break;
+  }
+  return errors;
+}
+
+export function otpConsentSummary(draft: ApplicationDraft): {
+  total: number;
+  verified: number;
+  sent: number;
+  none: number;
+} {
+  const named = draft.members.filter((member) => member.name.trim() && member.phone.trim());
+  return {
+    total: named.length,
+    verified: named.filter((member) => member.consentStatus === 'verified').length,
+    sent: named.filter((member) => member.consentStatus === 'sent').length,
+    none: named.filter((member) => member.consentStatus === 'none').length,
+  };
 }

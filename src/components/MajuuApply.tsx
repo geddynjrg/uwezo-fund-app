@@ -58,7 +58,13 @@ const GROUP_STEPS = ['Certificate', 'Males and females', 'Members received', 'Gr
 
 type Mode = 'choose' | 'individual' | 'group' | 'record' | 'group-record';
 
-export function MajuuApply({ onBack }: { onBack: () => void }) {
+export function MajuuApply({
+  onBack,
+  openRecordId,
+}: {
+  onBack: () => void;
+  openRecordId?: string;
+}) {
   const [mode, setMode] = useState<Mode>('choose');
   const [step, setStep] = useState(0);
   const [person, setPerson] = useState<IndividualMajuu>(emptyIndividual());
@@ -75,7 +81,30 @@ export function MajuuApply({ onBack }: { onBack: () => void }) {
     const rows = await listMajuu();
     setSaved(rows.filter((row): row is IndividualMajuu => row.kind === 'individual' && row.status !== 'draft'));
     setGroups(rows.filter((row): row is GroupMajuu => row.kind === 'group' && (row.status === 'complete' || Boolean(row.loanNumber) || Boolean(row.registrationNumber.trim()))));
+    return rows;
   }
+
+  useEffect(() => {
+    if (!openRecordId) return;
+    let cancelled = false;
+    void listMajuu().then((rows) => {
+      if (cancelled) return;
+      const hit = rows.find((row) => row.id === openRecordId);
+      if (!hit) return;
+      if (hit.kind === 'group') {
+        setGroup(hit);
+        setMode('group-record');
+      } else {
+        setPerson(hit);
+        setMode('record');
+      }
+      setMessage('');
+      setError('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openRecordId]);
 
   useEffect(() => {
     void reload();

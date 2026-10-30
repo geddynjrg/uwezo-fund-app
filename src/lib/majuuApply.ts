@@ -5,9 +5,9 @@ import { inferGender } from './genderFromName';
 import { isMseaOfficialPartner, lookupMsea, partnerByNationalId, type MseaPartner, type MseaRecord } from './msea';
 import { neaimsPlacementRequired } from './offlineApply';
 import { showPhoneAlert } from './notify';
-import { isLikelyKenyanMobile } from './phone';
+import { isLikelyKenyanMobile, normalizeKenyanPhone, sameKenyanLine } from './phone';
 import { probeOrigin } from './portalStatus';
-import { newId, pushInbox } from './session';
+import { getActiveSession, newId, pushInbox } from './session';
 
 export const GROUP_PURPOSE = 'Seek Funds to facilitate travel abroad for jobs';
 export const GROUP_ACTIVITIES = 'Travelling Abroad for Work';
@@ -123,6 +123,9 @@ export type IndividualMajuu = {
   individualNumber: string;
   status: 'draft' | 'saved' | 'numbered';
   notices: PendingNotice[];
+  /** Signed-in account that owns this record (lowercased email). */
+  ownerEmail?: string;
+  ownerPhone?: string;
 };
 
 export type RosterPerson = {
@@ -161,9 +164,40 @@ export type GroupMajuu = {
   submitRequested: boolean;
   serverApplicationId: string;
   notices: PendingNotice[];
+  /** Signed-in account that owns this record (lowercased email). */
+  ownerEmail?: string;
+  ownerPhone?: string;
 };
 
 export type MajuuRecord = IndividualMajuu | GroupMajuu;
+
+function normalizeOwnerEmail(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+function sessionOwner(): { ownerEmail: string; ownerPhone: string } {
+  const session = getActiveSession();
+  return {
+    ownerEmail: normalizeOwnerEmail(session?.email || ''),
+    ownerPhone: session?.phone ? normalizeKenyanPhone(session.phone) : '',
+  };
+}
+
+function majuuMatchesAccount(record: MajuuRecord, email: string, phone = ''): boolean {
+  const want = normalizeOwnerEmail(email);
+  if (!want) return false;
+  const owner = normalizeOwnerEmail(record.ownerEmail || '');
+  if (owner && owner === want) return true;
+  if (record.kind === 'individual') {
+    const rowEmail = normalizeOwnerEmail(record.email || '');
+    if (rowEmail && rowEmail === want) return true;
+    if (!owner && phone && record.phone && sameKenyanLine(phone, record.phone)) return true;
+  }
+  if (record.kind === 'group' && !owner && phone && record.officialPhone && sameKenyanLine(phone, record.officialPhone)) {
+    return true;
+  }
+  return false;
+}
 
 export function emptyGuarantor(): GuarantorDraft {
   return {
@@ -258,6 +292,8 @@ export function emptyIndividual(): IndividualMajuu {
     individualNumber: '',
     status: 'draft',
     notices: [],
+    ownerEmail: '',
+    ownerPhone: '',
   };
 }
 
@@ -292,6 +328,8 @@ export function emptyGroup(): GroupMajuu {
     submitRequested: false,
     serverApplicationId: '',
     notices: [],
+    ownerEmail: '',
+    ownerPhone: '',
   };
 }
 
@@ -341,12 +379,18 @@ export async function deleteMajuu(id: string): Promise<void> {
 }
 
 export async function saveMajuu(record: MajuuRecord): Promise<MajuuRecord> {
+  const owner = sessionOwner();
+  const stamped: MajuuRecord = {
+    ...record,
+    ownerEmail: normalizeOwnerEmail(record.ownerEmail || '') || owner.ownerEmail,
+    ownerPhone: record.ownerPhone || owner.ownerPhone,
+  };
   const db = await openDb();
   const tx = db.transaction(STORE, 'readwrite');
-  tx.objectStore(STORE).put(record);
+  tx.objectStore(STORE).put(stamped);
   await txDone(tx);
   db.close();
-  return record;
+  return stamped;
 }
 
 function normalizeRecord(row: MajuuRecord): MajuuRecord {
@@ -379,6 +423,14 @@ export async function listMajuu(): Promise<MajuuRecord[]> {
   });
   db.close();
   return rows.map(normalizeRecord).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Majuu records owned by the signed-in account (email), including legacy phone/email matches. */
+export async function listMajuuForAccount(email: string, phone = ''): Promise<MajuuRecord[]> {
+  const rows = await listMajuu();
+  const want = normalizeOwnerEmail(email);
+  if (!want) return [];
+  return rows.filter((record) => majuuMatchesAccount(record, want, phone));
 }
 
 export function individualsFor(records: MajuuRecord[], registrationNumber: string): IndividualMajuu[] {

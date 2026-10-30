@@ -6,11 +6,14 @@ import { openExternal } from '../lib/openLink';
 import type { PortalAvailability, PortalId } from '../lib/portalStatus';
 import type { AppSession } from '../lib/session';
 import type { StaffSession } from '../lib/staffSession';
+import type { OfflinePacket } from '../lib/offlineApply';
+import type { MajuuRecord } from '../lib/majuuApply';
 import {
   getNativeVersion,
   installNativeUpdate,
   onUpdateProgress,
 } from '../lib/native';
+import { MyApplications } from './MyApplications';
 
 type HomeProps = {
   onOpenQr: () => void;
@@ -18,6 +21,8 @@ type HomeProps = {
   onOpenNotifications: () => void;
   onOpenAuthenticator: () => void;
   onOpenOffline: (portal: PortalId) => void;
+  onOpenLoanPacket?: (packet: OfflinePacket) => void;
+  onOpenMajuuRecord?: (record: MajuuRecord) => void;
   portals: PortalAvailability;
   session?: AppSession | null;
   staff?: StaffSession | null;
@@ -27,7 +32,7 @@ type HomeProps = {
 
 const primaryLinks = [LINKS.majuu, LINKS.loans, LINKS.website] as const;
 /** Keep in sync with package.json / android versionName */
-const PACKAGE_VERSION = '1.2.7';
+const PACKAGE_VERSION = '1.2.8';
 
 function friendlyUpdateMessage(raw: string) {
   const text = String(raw || '').trim();
@@ -45,6 +50,8 @@ export function Home({
   onOpenNotifications,
   onOpenAuthenticator,
   onOpenOffline,
+  onOpenLoanPacket,
+  onOpenMajuuRecord,
   portals,
   session = null,
   staff = null,
@@ -151,13 +158,24 @@ export function Home({
           plus account sign-in and App QR browser login.
         </p>
         {session ? (
-          <p className="home-session">
-            Signed in as {session.email} · {session.phone}
-          </p>
+          <div className="home-session-row">
+            <span className="home-signed-pill">Signed in</span>
+            <p className="home-session">
+              {session.email} · {session.phone}
+            </p>
+          </div>
         ) : (
           <p className="home-session home-session--muted">Not signed in</p>
         )}
       </header>
+
+      {session && onOpenLoanPacket && onOpenMajuuRecord ? (
+        <MyApplications
+          session={session}
+          onOpenLoan={onOpenLoanPacket}
+          onOpenMajuu={onOpenMajuuRecord}
+        />
+      ) : null}
 
       <section className="link-stack" aria-label="Main destinations">
         {primaryLinks.map((link) => (
