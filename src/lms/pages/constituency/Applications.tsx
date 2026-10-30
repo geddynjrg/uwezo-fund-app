@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   approveApplicationOffline,
   assignApplicationPhaseOffline,
@@ -7,9 +7,20 @@ import {
   removeApplicationPhaseOffline,
   returnApplicationOffline,
   reviewApplicationOffline,
+  scoreApplicationOnline,
   unlinkApplicationOffline,
 } from '../../../lib/lmsOfflineSync';
-import { enrichGroups, loadConstituencyBundle, moneyKes, type EnrichedGroup } from '../../lib/analytics';
+import {
+  enrichGroups,
+  extractRiskMlDisplay,
+  isDecisionLocked,
+  loadConstituencyBundle,
+  moneyKes,
+  resolveConstituencyLabel,
+  resolveGroupLabel,
+  type EnrichedGroup,
+  type RiskMlDisplay,
+} from '../../lib/analytics';
 import { matchesSearch } from '../../lib/localQuery';
 import { PageHeader } from '../../shell/PageHeader';
 import type { LmsPageProps } from '../../types';
@@ -67,11 +78,10 @@ function nextAction(row: Record<string, unknown>): { tone: string; message: stri
   if (/reject/.test(status)) {
     return { tone: 'muted', message: 'Application was rejected at constituency. You can review the decision to reopen it.', cta: 'review' };
   }
-  if (/pending_submission_to_hq|approv|disburs|issued/.test(status)) {
+  if (isDecisionLocked(status)) {
     return {
       tone: 'success',
-      message: 'Constituency decision recorded. Review the decision to undo, or continue phase workflow when online.',
-      cta: 'review',
+      message: `Decision recorded (${String(row.display_status)}). Further approve/reject actions are locked.`,
     };
   }
   if (!row.loan_phase_id && !row.phase_label) {
@@ -88,6 +98,7 @@ function ApplicationsView({
   constituency,
   revision,
   mode,
+  online,
   onNavigate,
   busy: parentBusy,
   setBusy,
@@ -97,6 +108,8 @@ function ApplicationsView({
   const [loans, setLoans] = useState<Record<string, unknown>[]>([]);
   const [phases, setPhases] = useState<Record<string, unknown>[]>([]);
   const [groups, setGroups] = useState<EnrichedGroup[]>([]);
+  const [wards, setWards] = useState<Record<string, unknown>[]>([]);
+  const [constituencyTitle, setConstituencyTitle] = useState(constituency || 'Constituency');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [phaseFilter, setPhaseFilter] = useState('');
@@ -115,6 +128,9 @@ function ApplicationsView({
   const [matchQuery, setMatchQuery] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
   const [localRevision, setLocalRevision] = useState(0);
+  const [riskMl, setRiskMl] = useState<RiskMlDisplay | null>(null);
+  const [scoreBusy, setScoreBusy] = useState(false);
+  const scoredIdsRef = useRef<Set<number>>(new Set());
   const busy = parentBusy || localBusy;
 
   async function reload() {
@@ -122,18 +138,26 @@ function ApplicationsView({
     setApps(bundle.apps);
     setLoans(bundle.loans);
     setPhases(bundle.phases);
+    setWards(bundle.wards);
     setGroups(enrichGroups(bundle.groups, bundle.wards, bundle.loans));
+    setConstituencyTitle(
+      resolveConstituencyLabel(constituency, bundle.meta?.constituencyName, bundle.wards),
+    );
   }
 
   useEffect(() => {
     void reload();
-  }, [email, revision, localRevision]);
+  }, [email, revision, localRevision, constituency]);
 
   const groupById = useMemo(() => new Map(groups.map((g) => [String(g.id), g])), [groups]);
   const phaseById = useMemo(() => new Map(phases.map((p) => [String(p.id), p])), [phases]);
 
   const title =
-    mode === 'tasks' ? 'Approval Tasks' : mode === 'loans' ? 'Applied Loans' : `${constituency || 'Constituency'} Constituency`;
+    mode === 'tasks'
+      ? 'Approval Tasks'
+      : mode === 'loans'
+        ? 'Applied Loans'
+        : `${constituencyTitle} Constituency`;
   const subtitle =
     mode === 'tasks' ? 'Pending constituency review queue.' : mode === 'loans' ? 'Applied loan register.' : 'Manage loan applications.';
 
@@ -150,10 +174,15 @@ function ApplicationsView({
           app.app_id ||
           app.group_code ||
           (app.id != null ? String(app.id) : '—'),
-        group_name: group.name || app.group_name || `Group #${app.group_id || '—'}`,
+        group_name: resolveGroupLabel(app, group),
         group_code: group.code || app.group_code || '',
         group_reg: group.reg_number || group.registration_number || app.reg_number || '',
-        ward_name: group.ward_name || '—',
+        ward_name: group.ward_name || app.ward_name || '—',
+        constituency_name: resolveConstituencyLabel(
+          String(app.constituency_name || constituencyTitle || ''),
+          constituencyTitle,
+          wards,
+        ),
         phase_label: phase.phase || phase.phase_ref || (app.loan_phase_id ? String(app.loan_phase_id) : ''),
         amount: Number(app.amount_applied || app.loan_amount || 0),
         display_status: app.status || app.vetting_status || '—',
@@ -164,7 +193,7 @@ function ApplicationsView({
       list = list.filter((row) => /new|pending|submitted|review|task/i.test(String(row.display_status)));
     }
     return list;
-  }, [apps, groupById, phaseById, mode]);
+  }, [apps, groupById, phaseById, mode, constituencyTitle, wards]);
 
   const loanRows = useMemo(
     () =>
@@ -173,7 +202,7 @@ function ApplicationsView({
         return {
           ...loan,
           application_id: loan.id,
-          group_name: group.name || `Group #${loan.group_id}`,
+          group_name: resolveGroupLabel(loan, group),
           ward_name: group.ward_name || '—',
           phase_label: '',
           amount: Number(loan.amount_applied || 0),
@@ -240,12 +269,65 @@ function ApplicationsView({
     setReturnComment('');
     setAssignPhaseId(String(row.loan_phase_id || ''));
     setMatchQuery(String(row.group_name || row.group_code || '').trim());
+    setRiskMl(extractRiskMlDisplay(row));
   }
 
   function closeReview() {
     setSelected(null);
     setPanel('details');
+    setRiskMl(null);
+    setScoreBusy(false);
   }
+
+  useEffect(() => {
+    if (!selected || mode === 'loans') return;
+    const phaseId = Number(selected.id);
+    if (!phaseId || !Number.isFinite(phaseId)) return;
+    const existing = extractRiskMlDisplay(selected);
+    setRiskMl(existing);
+    // Prefer synced ML fields; only call repay-ml when the numeric ML score is missing.
+    if (existing.mlScore !== '—' || online !== true || scoredIdsRef.current.has(phaseId)) return;
+    const applicationId = String(selected.application_number || selected.application_id || '').trim();
+    let cancelled = false;
+    scoredIdsRef.current.add(phaseId);
+    setScoreBusy(true);
+    void scoreApplicationOnline({
+      email,
+      id: phaseId,
+      application_id: applicationId && !/^\d+$/.test(applicationId) ? applicationId : undefined,
+    }).then((result) => {
+      if (cancelled) return;
+      setScoreBusy(false);
+      if (result.ok && (result.score || result.risk_level || result.assessment_data)) {
+        setSelected((prev) => {
+          if (!prev || Number(prev.id) !== phaseId) return prev;
+          const nextRow = {
+            ...prev,
+            ...(result.risk_level != null ? { risk_level: result.risk_level } : {}),
+            ...(result.assessment_data !== undefined ? { assessment_data: result.assessment_data } : {}),
+          };
+          setRiskMl(extractRiskMlDisplay(nextRow, result.score || null));
+          return nextRow;
+        });
+        setApps((prev) =>
+          prev.map((row) =>
+            Number(row.id) === phaseId
+              ? {
+                  ...row,
+                  ...(result.risk_level != null ? { risk_level: result.risk_level } : {}),
+                  ...(result.assessment_data !== undefined ? { assessment_data: result.assessment_data } : {}),
+                }
+              : row,
+          ),
+        );
+      } else {
+        scoredIdsRef.current.delete(phaseId);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.id, mode, online, email]);
 
   async function runApprove() {
     if (!selected || mode === 'loans') return;
@@ -435,6 +517,10 @@ function ApplicationsView({
   if (selected && mode !== 'loans') {
     const steps = workflowSteps(selected);
     const next = nextAction(selected);
+    const decided = isDecisionLocked(selected.display_status);
+    const riskView = riskMl || extractRiskMlDisplay(selected);
+    const decisionPanel = panel === 'approve' || panel === 'reject' || panel === 'return' || panel === 'review';
+    const activePanel = decided && decisionPanel ? 'details' : panel;
     return (
       <div className="app-review-v2-shell">
         <div className="lms-card" style={{ borderRadius: 12, marginBottom: '0.75rem' }}>
@@ -525,6 +611,10 @@ function ApplicationsView({
                       <span>{String(selected.group_name)}</span>
                     </li>
                     <li>
+                      <b>Constituency</b>
+                      <span>{String(selected.constituency_name || constituencyTitle)}</span>
+                    </li>
+                    <li>
                       <b>Ward</b>
                       <span>{String(selected.ward_name || '—')}</span>
                     </li>
@@ -537,8 +627,33 @@ function ApplicationsView({
                       <span>{String(selected.display_status)}</span>
                     </li>
                     <li>
+                      <b>Risk score</b>
+                      <span>
+                        {scoreBusy && riskView.riskLevel === '—'
+                          ? 'Scoring…'
+                          : riskView.riskLevel}
+                        {riskView.riskBand !== '—' && riskView.riskBand !== riskView.riskLevel
+                          ? ` (${riskView.riskBand})`
+                          : ''}
+                      </span>
+                    </li>
+                    <li>
+                      <b>ML score</b>
+                      <span>
+                        {scoreBusy && riskView.mlScore === '—'
+                          ? 'Scoring…'
+                          : riskView.mlScore !== '—'
+                            ? `${riskView.mlScore}${riskView.mlBand !== '—' ? ` · ${riskView.mlBand}` : ''}`
+                            : '—'}
+                      </span>
+                    </li>
+                    <li>
                       <b>Submitted</b>
                       <span>{String(selected.submitted_on)}</span>
+                    </li>
+                    <li>
+                      <b>Score note</b>
+                      <span className="lms-muted">{riskView.disclaimer}</span>
                     </li>
                   </ul>
                 ) : null}
@@ -579,7 +694,7 @@ function ApplicationsView({
                   </ul>
                 ) : null}
 
-                {panel === 'approve' ? (
+                {activePanel === 'approve' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -613,7 +728,7 @@ function ApplicationsView({
                   </form>
                 ) : null}
 
-                {panel === 'reject' ? (
+                {activePanel === 'reject' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -648,7 +763,7 @@ function ApplicationsView({
                   </form>
                 ) : null}
 
-                {panel === 'link' ? (
+                {activePanel === 'link' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -686,7 +801,7 @@ function ApplicationsView({
                   </form>
                 ) : null}
 
-                {panel === 'phase' ? (
+                {activePanel === 'phase' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -723,7 +838,7 @@ function ApplicationsView({
                   </form>
                 ) : null}
 
-                {panel === 'return' ? (
+                {activePanel === 'return' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -753,7 +868,7 @@ function ApplicationsView({
                   </form>
                 ) : null}
 
-                {panel === 'review' ? (
+                {activePanel === 'review' ? (
                   <form
                     className="lms-form"
                     style={{ marginTop: '1rem' }}
@@ -854,33 +969,49 @@ function ApplicationsView({
                   <label className="lms-muted" style={{ display: 'block', fontWeight: 700, textTransform: 'uppercase', fontSize: '0.7rem', marginBottom: '0.55rem' }}>
                     Final decision
                   </label>
-                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                    <button type="button" className="btn-refresh-premium" style={{ flex: 1 }} onClick={() => setPanel('approve')} disabled={!selected.group_id}>
-                      Approve
-                    </button>
-                    <button type="button" className="btn-refresh-premium-danger" style={{ flex: 1 }} onClick={() => setPanel('reject')}>
-                      Reject
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-outline-primary btn-sm"
-                    style={{ width: '100%', marginTop: '0.55rem' }}
-                    onClick={() => setPanel('return')}
-                    disabled={/reject|approv|defer|pending_submission|disburs|issued/i.test(String(selected.display_status || ''))}
-                  >
-                    Return to group
-                  </button>
-                  {/reject|pending_submission_to_hq|approv/i.test(String(selected.display_status || '')) ? (
-                    <button
-                      type="button"
-                      className="btn-outline-secondary btn-sm"
-                      style={{ width: '100%', marginTop: '0.45rem' }}
-                      onClick={() => setPanel('review')}
-                    >
-                      Review decision
-                    </button>
-                  ) : null}
+                  {decided ? (
+                    <div style={{ border: '1px solid var(--lms-line)', borderRadius: 8, padding: '0.75rem', background: '#f8f9fa' }}>
+                      <small className="lms-muted" style={{ display: 'block', textTransform: 'uppercase', fontWeight: 700, fontSize: '0.65rem' }}>
+                        Status (read-only)
+                      </small>
+                      <strong className={statusChipClass(String(selected.display_status))} style={{ display: 'inline-block', marginTop: '0.35rem' }}>
+                        {String(selected.display_status)}
+                      </strong>
+                      <p className="lms-muted" style={{ margin: '0.55rem 0 0', fontSize: '0.8rem' }}>
+                        Approve, reject, return, and review decision are hidden after constituency approval / HQ submission / disbursement.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <button type="button" className="btn-refresh-premium" style={{ flex: 1 }} onClick={() => setPanel('approve')} disabled={!selected.group_id}>
+                          Approve
+                        </button>
+                        <button type="button" className="btn-refresh-premium-danger" style={{ flex: 1 }} onClick={() => setPanel('reject')}>
+                          Reject
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-outline-primary btn-sm"
+                        style={{ width: '100%', marginTop: '0.55rem' }}
+                        onClick={() => setPanel('return')}
+                        disabled={/reject|approv|defer|pending_submission|disburs|issued/i.test(String(selected.display_status || ''))}
+                      >
+                        Return to group
+                      </button>
+                      {/reject/i.test(String(selected.display_status || '')) ? (
+                        <button
+                          type="button"
+                          className="btn-outline-secondary btn-sm"
+                          style={{ width: '100%', marginTop: '0.45rem' }}
+                          onClick={() => setPanel('review')}
+                        >
+                          Review decision
+                        </button>
+                      ) : null}
+                    </>
+                  )}
                 </div>
 
                 <button type="button" className="btn-default btn-sm" style={{ width: '100%', marginTop: '0.85rem' }} onClick={closeReview}>
@@ -892,21 +1023,29 @@ function ApplicationsView({
         </div>
 
         <div className="app-review-mobile-actions">
-          <button type="button" className="btn-refresh-premium" style={{ flex: 1 }} onClick={() => setPanel('approve')} disabled={!selected.group_id}>
-            Approve
-          </button>
-          <button type="button" className="btn-refresh-premium-danger" style={{ flex: 1 }} onClick={() => setPanel('reject')}>
-            Reject
-          </button>
-          <button
-            type="button"
-            className="btn-outline-primary"
-            style={{ flex: 1 }}
-            onClick={() => setPanel('return')}
-            disabled={/reject|approv|defer|pending_submission|disburs|issued/i.test(String(selected.display_status || ''))}
-          >
-            Return
-          </button>
+          {decided ? (
+            <div className="lms-muted" style={{ flex: 1, textAlign: 'center', fontWeight: 700 }}>
+              {String(selected.display_status)}
+            </div>
+          ) : (
+            <>
+              <button type="button" className="btn-refresh-premium" style={{ flex: 1 }} onClick={() => setPanel('approve')} disabled={!selected.group_id}>
+                Approve
+              </button>
+              <button type="button" className="btn-refresh-premium-danger" style={{ flex: 1 }} onClick={() => setPanel('reject')}>
+                Reject
+              </button>
+              <button
+                type="button"
+                className="btn-outline-primary"
+                style={{ flex: 1 }}
+                onClick={() => setPanel('return')}
+                disabled={/reject|approv|defer|pending_submission|disburs|issued/i.test(String(selected.display_status || ''))}
+              >
+                Return
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

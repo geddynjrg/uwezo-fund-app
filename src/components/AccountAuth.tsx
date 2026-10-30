@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
@@ -27,7 +27,7 @@ import { openApplicantCopy, sealApplicantCopy } from '../lib/applicantVault';
 import { clearPublishedRecords, publishApplicantRecords, pullApplicantRecords, recordsNote } from '../lib/applicantRecords';
 import { MyApplications } from './MyApplications';
 import { officerCopyStatus, openOfficerCopy, sealOfficerCopy } from '../lib/officerVault';
-import { getLastEboardProbeStatus, openEboardHome, probeEboardLogin } from '../lib/eboard';
+import { getLastEboardProbeStatus, prepareEboardInApp, probeEboardLogin } from '../lib/eboard';
 import { loadStaffSession, saveStaffSession, type MailLink, type StaffAuthVia } from '../lib/staffSession';
 import { isUwezoMailbox, openMailboxForOfficer, signInMailbox } from '../lib/zimbraAuth';
 
@@ -102,6 +102,12 @@ type PortalChooser = {
   probe: ApplicantPortalProbe;
 };
 
+type LoginProgress = {
+  label: string;
+  budgetSec: number;
+  startedAt: number;
+};
+
 type AccountAuthProps = {
   onBack: () => void;
   onSessionChange?: (session: AppSession | null) => void;
@@ -109,6 +115,7 @@ type AccountAuthProps = {
   onOpenLms?: (officer: OfficerOpenPayload) => void;
   onOpenLoanPacket?: (packet: import('../lib/offlineApply').OfflinePacket) => void;
   onOpenMajuuRecord?: (record: import('../lib/majuuApply').MajuuRecord) => void;
+  onOpenEboard?: (input: { email?: string; password?: string; url?: string }) => void;
 };
 
 export function AccountAuth({
@@ -118,6 +125,7 @@ export function AccountAuth({
   onOpenLms,
   onOpenLoanPacket,
   onOpenMajuuRecord,
+  onOpenEboard,
 }: AccountAuthProps) {
   const [mode, setMode] = useState<Mode>('menu');
   const [email, setEmail] = useState('');
@@ -142,12 +150,36 @@ export function AccountAuth({
   const [savedForLater, setSavedForLater] = useState(false);
   const [recordNote, setRecordNote] = useState('');
   const [portalChooser, setPortalChooser] = useState<PortalChooser | null>(null);
+  const [loginProgress, setLoginProgress] = useState<LoginProgress | null>(null);
+  const [progressTick, setProgressTick] = useState(0);
+  const [altPortalPassword, setAltPortalPassword] = useState('');
 
   useEffect(() => {
     const existing = getActiveSession();
     setSession(existing);
     if (existing) setMode('signed_in');
   }, []);
+
+  useEffect(() => {
+    if (!busy || !loginProgress) return;
+    const id = window.setInterval(() => setProgressTick((n) => n + 1), 400);
+    return () => window.clearInterval(id);
+  }, [busy, loginProgress]);
+
+  const progressRemainingSec = useMemo(() => {
+    if (!loginProgress) return 0;
+    void progressTick;
+    const elapsed = (Date.now() - loginProgress.startedAt) / 1000;
+    return Math.max(0, Math.ceil(loginProgress.budgetSec - elapsed));
+  }, [loginProgress, progressTick]);
+
+  function beginLoginStage(label: string, budgetSec: number) {
+    setLoginProgress({ label, budgetSec, startedAt: Date.now() });
+  }
+
+  function endLoginStage() {
+    setLoginProgress(null);
+  }
 
   useEffect(() => {
     if (mode !== 'login') return;
@@ -291,18 +323,23 @@ export function AccountAuth({
     authVia: StaffAuthVia;
     lmsPassword: string;
     mailOnly?: boolean;
+    includeEboard?: boolean;
   }) {
+    beginLoginStage('Checking Majuu and Loans…', 12);
     let probe = emptyPortalProbe();
     try {
+      // Defer eBoard off the LMS/Mail hot path unless explicitly requested.
       probe = await appLoginProbe({
         email: input.email,
         password: input.password,
         phone: input.phone,
+        includeEboard: input.includeEboard === true || Boolean(input.mailOnly),
       });
     } catch {
       probe = emptyPortalProbe();
     }
     if (probe.majuu || probe.loans || probe.eboard) {
+      setAltPortalPassword('');
       setPortalChooser({
         email: input.email,
         password: input.password,
@@ -334,14 +371,55 @@ export function AccountAuth({
     });
   }
 
-  async function openEboardFromChooser(chooser: PortalChooser) {
-    if (!chooser.probe.eboard) {
-      setError('eBoard did not accept this password.');
+  async function retryPortalChooserPassword() {
+    if (!portalChooser) return;
+    const pass = altPortalPassword.trim() || portalChooser.password;
+    if (!pass) {
+      setError('Enter the Majuu, Loans, or eBoard password to retry.');
       return;
     }
     setBusy(true);
     setError('');
+    beginLoginStage('Verifying portal password…', 15);
     try {
+      const probe = await appLoginProbe({
+        email: portalChooser.email,
+        password: pass,
+        phone: portalChooser.phone,
+        includeEboard: true,
+      });
+      if (!probe.majuu && !probe.loans && !probe.eboard) {
+        const status = getLastEboardProbeStatus();
+        setError(
+          status.detail ||
+            'That password was not accepted on Majuu, Loans, or eBoard.',
+        );
+        return;
+      }
+      setPortalChooser({ ...portalChooser, password: pass, probe });
+      setAltPortalPassword('');
+      setMessage('Portal password accepted. Choose LMS, Wezesha Majuu, Loans, or eBoard.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not verify portal password.');
+    } finally {
+      endLoginStage();
+      setBusy(false);
+    }
+  }
+
+  async function openEboardFromChooser(chooser: PortalChooser) {
+    setBusy(true);
+    setError('');
+    beginLoginStage('Opening eBoard…', 15);
+    try {
+      const pass = altPortalPassword.trim() || chooser.password;
+      const prepared = chooser.probe.eboard
+        ? await prepareEboardInApp(chooser.email, pass)
+        : await prepareEboardInApp(chooser.email, pass);
+      if (!prepared.ok) {
+        setError(prepared.message || 'eBoard did not accept this password.');
+        return;
+      }
       let mail = chooser.mail;
       let passwordReset = chooser.officer.passwordReset;
       // Same as LMS password login: never treat the typed/eBoard password as Zimbra.
@@ -365,15 +443,16 @@ export function AccountAuth({
         eboardVerified: true,
       });
       setPortalChooser(null);
-      await openEboardHome();
+      onOpenEboard?.({ email: chooser.email, password: pass, url: prepared.url });
       setMessage(
         isUwezoMailbox(chooser.email)
-          ? 'Opening eBoard. Mail stays available for this session.'
-          : 'Opening eBoard…',
+          ? 'Opening eBoard in the app. Mail stays available for this session.'
+          : 'Opening eBoard in the app…',
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not open eBoard.');
     } finally {
+      endLoginStage();
       setBusy(false);
     }
   }
@@ -515,48 +594,39 @@ export function AccountAuth({
       eboard: probe.eboard,
     });
     // #endregion
-    if (!probe.eboard) return false;
+    if (!probe.eboard && !probe.loans && !probe.majuu) return false;
     const linked = await ensureMailLink(emailNorm, typedPassword, true);
+    const bits = [
+      priorDetail,
+      probe.eboard ? 'eBoard accepted this password.' : '',
+      probe.loans ? 'Loans accepted this password.' : '',
+      probe.majuu ? 'Wezesha Majuu accepted this password.' : '',
+      'LMS was not opened for this sign-in.',
+    ].filter(Boolean);
     const officer: OfficerOpenPayload = {
       email: emailNorm,
       constituency: '',
       passwordReset: Boolean(linked?.passwordReset),
       role: 'staff',
-      syncDetail: [
-        priorDetail,
-        'eBoard accepted this password. LMS was not opened for this sign-in.',
-      ]
-        .filter(Boolean)
-        .join(' '),
+      syncDetail: bits.join(' '),
       mailOnly: true,
     };
-    if (probe.majuu || probe.loans) {
-      setPortalChooser({
-        email: emailNorm,
-        password: typedPassword,
-        phone: phoneNorm,
-        officer,
-        mail: linked?.mail || null,
-        authVia: 'zimbra',
-        lmsPassword: '',
-        probe,
-      });
-      setMessage('eBoard accepted this password. Choose eBoard, Wezesha Majuu, or Loans.');
-      return true;
-    }
-    rememberOfficer({
+    setAltPortalPassword('');
+    setPortalChooser({
       email: emailNorm,
-      constituency: '',
-      passwordReset: Boolean(linked?.passwordReset),
-      role: 'staff',
-      syncDetail: officer.syncDetail,
-      lmsPassword: '',
-      authVia: 'zimbra',
+      password: typedPassword,
+      phone: phoneNorm,
+      officer,
       mail: linked?.mail || null,
-      mailOnly: true,
-      eboardVerified: true,
+      authVia: 'zimbra',
+      lmsPassword: '',
+      probe,
     });
-    setMessage('Signed in with eBoard. Mail is available when the mailbox link succeeded.');
+    setMessage(
+      probe.eboard && !probe.majuu && !probe.loans
+        ? 'eBoard accepted this password. Choose eBoard or LMS/Mail.'
+        : 'Choose Wezesha Majuu, Loans, or eBoard for this sign-in.',
+    );
     return true;
   }
 
@@ -592,10 +662,14 @@ export function AccountAuth({
     setError('');
     setSavedForLater(false);
     setPortalChooser(null);
+    beginLoginStage('Checking mailbox…', 12);
     try {
       if (isUwezoMailbox(emailNorm)) {
         // Domain mailboxes are for LMS / mail only — never create Majuu or Loans applicant accounts.
         const lmsOnline = await lmsHostOnline();
+        // eBoard-first race: start probe in parallel so secretariat can open ≤15s when host is up.
+        const eboardRace = probeEboardLogin(emailNorm, password).catch(() => false);
+        beginLoginStage('Signing in to mailbox…', 12);
         const mailbox = await signInMailbox(emailNorm, password);
         const mailLink: MailLink | null = mailbox.ok
           ? { email: mailbox.email, token: mailbox.token, password: mailbox.password, via: 'password' }
@@ -727,7 +801,52 @@ export function AccountAuth({
           passLen: password.length,
         });
         // #endregion
+        // Prefer a fast eBoard accept over waiting on LMS scrape when password is eBoard's.
+        beginLoginStage('Verifying eBoard…', 15);
+        const eboardFast = await Promise.race([
+          eboardRace.then((ok) => ({ ok, timedOut: false as const })),
+          new Promise<{ ok: false; timedOut: true }>((resolve) =>
+            window.setTimeout(() => resolve({ ok: false, timedOut: true }), 15000),
+          ),
+        ]);
+        if (eboardFast.ok) {
+          beginLoginStage('Checking Majuu and Loans…', 10);
+          const portalProbe = await appLoginProbe({
+            email: emailNorm,
+            password,
+            phone: phoneNorm,
+            includeEboard: false,
+          });
+          portalProbe.eboard = true;
+          const linked = await ensureMailLink(emailNorm, password, true);
+          setAltPortalPassword('');
+          setPortalChooser({
+            email: emailNorm,
+            password,
+            phone: phoneNorm,
+            officer: {
+              email: emailNorm,
+              constituency: '',
+              passwordReset: Boolean(linked?.passwordReset),
+              role: 'staff',
+              syncDetail: [
+                mailbox.message,
+                'eBoard accepted this password. LMS was not opened for this sign-in.',
+              ]
+                .filter(Boolean)
+                .join(' '),
+              mailOnly: true,
+            },
+            mail: linked?.mail || null,
+            authVia: 'zimbra',
+            lmsPassword: '',
+            probe: portalProbe,
+          });
+          setMessage('eBoard accepted this password. Choose eBoard, Wezesha Majuu, or Loans.');
+          return;
+        }
         if (lmsOnline) {
+          beginLoginStage('Opening LMS…', 20);
           const lms = await syncLmsMailbox(emailNorm, password, {
             refresh: needLmsSession || refreshDetails,
           });
@@ -847,6 +966,7 @@ export function AccountAuth({
       }
       if (await restoreApplicant(emailNorm, password, phoneNorm)) return;
     } finally {
+      endLoginStage();
       setBusy(false);
     }
     // Domain mailboxes never use the citizen Majuu/Loans create-or-login path.
@@ -884,6 +1004,7 @@ export function AccountAuth({
     setBusy(true);
     setError('');
     setSavedForLater(false);
+    beginLoginStage('Connecting to Majuu…', 10);
     try {
       const majuuUp = await probeOrigin(LINKS.majuu.url);
       if (!majuuUp || navigator.onLine === false) {
@@ -892,6 +1013,7 @@ export function AccountAuth({
         return;
       }
       if (Capacitor.isNativePlatform() && !simMatch) {
+        beginLoginStage('Confirming email and phone…', 20);
         if (!otpChallenge) {
           const sent = await requestContactConfirmation({
             email: emailNorm,
@@ -918,6 +1040,7 @@ export function AccountAuth({
           phoneCode: phoneCode.trim(),
         });
       }
+      beginLoginStage('Signing in…', 15);
       const data = await appUnifiedLogin({
         email: emailNorm,
         password,
@@ -932,12 +1055,7 @@ export function AccountAuth({
       const origin = majuuAccessToken
         ? 'https://majuu.uwezo.go.ke'
         : 'https://loans.uwezo.go.ke';
-      let eboardVerified = false;
-      try {
-        eboardVerified = await probeEboardLogin(emailNorm, password);
-      } catch {
-        eboardVerified = false;
-      }
+      // Defer eBoard off the citizen login hot path; verify on Open eBoard.
       const next: AppSession = {
         email: emailNorm,
         phone: phoneNorm,
@@ -953,33 +1071,49 @@ export function AccountAuth({
         loansAccessToken: loansAccessToken || undefined,
         loansRefreshToken: String(data.loansRefreshToken || '') || undefined,
         portals,
-        eboardVerified: eboardVerified || undefined,
+        eboardVerified: undefined,
       };
       if (!next.accessToken) throw new Error('Login succeeded but no access token returned.');
       saveSession(next);
       clearPendingLogin();
+      beginLoginStage('Loading applications…', 15);
       const records = await pullApplicantRecords(next);
-      await sealApplicantCopy(password, {
+      const numbers = await publishApplicantRecords(records, next, { pullOk: records.pullOk });
+      setRecordNote(
+        records.pullOk
+          ? recordsNote(numbers)
+          : numbers.length > 0
+            ? recordsNote(numbers)
+            : majuuAccessToken
+              ? 'Could not refresh applications from the server. Prior synced apps on this phone are kept.'
+              : 'Loans-only session: Wezesha Majuu applications are not loaded until you sign in with Majuu.',
+      );
+      applySession(next);
+      setMode('signed_in');
+      setMessage(
+        data.created
+          ? 'Account created and you are signed in.'
+          : 'Signed in. Applications are loading on this phone.',
+      );
+      // Seal vault after UI is interactive (PBKDF2 is expensive).
+      void sealApplicantCopy(password, {
         email: emailNorm,
         phone: phoneNorm,
         savedAt: records.savedAt,
         session: next,
         records,
-      });
-      const numbers = await publishApplicantRecords(records, next);
-      setRecordNote(recordsNote(numbers));
-      applySession(next);
-      setMode('signed_in');
-      setMessage(
-        [
-          data.created
-            ? 'Account created and you are signed in. An encrypted copy is saved on this phone.'
-            : 'Signed in. An encrypted copy of this account is saved on this phone.',
-          eboardVerified ? 'eBoard is available for this session.' : '',
-        ]
-          .filter(Boolean)
-          .join(' '),
-      );
+      }).catch(() => {});
+      // Background eBoard probe — does not block sign-in.
+      void probeEboardLogin(emailNorm, password)
+        .then((ok) => {
+          if (!ok) return;
+          const current = getActiveSession();
+          if (!current || current.email !== emailNorm) return;
+          const updated = { ...current, eboardVerified: true };
+          saveSession(updated);
+          applySession(updated);
+        })
+        .catch(() => {});
     } catch (err) {
       if (isUnreachableError(err)) {
         if (await restoreApplicant(emailNorm, password, phoneNorm)) return;
@@ -988,6 +1122,7 @@ export function AccountAuth({
       }
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
+      endLoginStage();
       setBusy(false);
     }
   }
@@ -1040,6 +1175,12 @@ export function AccountAuth({
       <div className="chat-thread">
         {message ? <div className="bubble bubble--bot">{message}</div> : null}
         {error ? <div className="bubble bubble--system">{error}</div> : null}
+        {busy && loginProgress ? (
+          <div className="bubble bubble--bot login-progress" role="status" aria-live="polite">
+            <strong>{loginProgress.label}</strong>
+            <span>About {progressRemainingSec}s remaining</span>
+          </div>
+        ) : null}
         {savedForLater && onContinueOffline ? (
           <div className="chat-success__actions">
             <button type="button" className="btn-primary" onClick={() => onContinueOffline('loans')}>
@@ -1096,16 +1237,33 @@ export function AccountAuth({
                 Open Loans applications
               </button>
             ) : null}
-            {portalChooser.probe.eboard ? (
-              <button
-                type="button"
-                className="btn-ghost"
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={busy}
+              onClick={() => void openEboardFromChooser(portalChooser)}
+            >
+              Open eBoard
+            </button>
+            <label className="account-alt-password">
+              Different Majuu / Loans / eBoard password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={altPortalPassword}
+                onChange={(e) => setAltPortalPassword(e.target.value)}
                 disabled={busy}
-                onClick={() => void openEboardFromChooser(portalChooser)}
-              >
-                Open eBoard
-              </button>
-            ) : null}
+                placeholder="Optional — retry with this password"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={busy || !altPortalPassword.trim()}
+              onClick={() => void retryPortalChooserPassword()}
+            >
+              Retry portal password
+            </button>
             <button type="button" className="btn-ghost" disabled={busy} onClick={() => setPortalChooser(null)}>
               Cancel
             </button>
@@ -1153,16 +1311,40 @@ export function AccountAuth({
               />
             ) : null}
             <div className="chat-success__actions">
-              {session.eboardVerified ? (
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={busy}
-                  onClick={() => void openEboardHome()}
-                >
-                  Open eBoard
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy}
+                onClick={() => {
+                  void (async () => {
+                    setBusy(true);
+                    beginLoginStage('Opening eBoard…', 15);
+                    setError('');
+                    try {
+                      const prepared = await prepareEboardInApp(session.email, password || undefined);
+                      if (!prepared.ok) {
+                        setError(prepared.message || 'Could not open eBoard.');
+                        return;
+                      }
+                      const updated = { ...session, eboardVerified: true };
+                      saveSession(updated);
+                      applySession(updated);
+                      onOpenEboard?.({
+                        email: session.email,
+                        password: password || undefined,
+                        url: prepared.url,
+                      });
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Could not open eBoard.');
+                    } finally {
+                      endLoginStage();
+                      setBusy(false);
+                    }
+                  })();
+                }}
+              >
+                Open eBoard
+              </button>
               <button type="button" className="btn-ghost" onClick={signOut}>
                 Sign out
               </button>

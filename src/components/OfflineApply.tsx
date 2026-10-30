@@ -1,7 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import logo from '../assets/uwezo-fund-logo.png';
 import { LINKS } from '../config';
+import {
+  BUSINESS_TYPE_OPTIONS,
+  GROUP_ACTIVITY_OPTIONS,
+  GROUP_PURPOSE_OPTIONS,
+  LOAN_TYPE_OPTIONS,
+  MEMBER_POSITION_OPTIONS,
+  NATURE_OF_BUSINESS_OPTIONS,
+  NATURE_OF_GROUP_OPTIONS,
+  VALUE_CHAIN_OPTIONS,
+  type TaxonomyOption,
+} from '../data/loanTaxonomySnapshot';
 import {
   assignApplicationNumber,
   createPacket,
@@ -33,12 +44,91 @@ import {
 } from '../lib/ebisSms';
 import { inferGender } from '../lib/genderFromName';
 import { GROUP_BANKS, loadGroupBankBranches, type BankBranches } from '../lib/groupBanks';
+import {
+  activityShowsOther,
+  activityShowsTableBanking,
+  activityShowsValueChain,
+  parseTaxonomyValues,
+  toggleTaxonomyValue,
+} from '../lib/loanTaxonomy';
 import { checkMseaHealth, findMseaChairPartners, isMseaChairPartner, lookupMsea, phonesFromRecord } from '../lib/msea';
 import { loadPendingLogin } from '../lib/pendingLogin';
 import { probeOrigin } from '../lib/portalStatus';
 import { searchAgencies, type AgencyHit } from '../lib/registries';
 import { getActiveSession } from '../lib/session';
+import { LandmarkMapField } from './LandmarkMapField';
 import { MajuuApplicationList } from './MajuuApply';
+
+function CheckboxGroupField({
+  label,
+  options,
+  value,
+  readOnly,
+  onChange,
+}: {
+  label: string;
+  options: TaxonomyOption[];
+  value: string;
+  readOnly?: boolean;
+  onChange: (next: string) => void;
+}) {
+  const selected = useMemo(() => new Set(parseTaxonomyValues(value, options)), [value, options]);
+  return (
+    <fieldset className="checkbox-group" disabled={readOnly}>
+      <legend>{label}</legend>
+      <div className="checkbox-group__options">
+        {options.map((option) => (
+          <label key={option.value} className="checkbox-group__option">
+            <input
+              type="checkbox"
+              checked={selected.has(option.value)}
+              disabled={readOnly}
+              onChange={() => onChange(toggleTaxonomyValue(value, option.value, options))}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function RadioGroupField({
+  label,
+  options,
+  value,
+  readOnly,
+  onChange,
+  name,
+}: {
+  label: string;
+  options: TaxonomyOption[];
+  value: string;
+  readOnly?: boolean;
+  onChange: (next: string) => void;
+  name: string;
+}) {
+  return (
+    <fieldset className="radio-group" disabled={readOnly}>
+      <legend>{label}</legend>
+      <div className="radio-group__options">
+        {options.map((option) => (
+          <label key={option.value} className="radio-group__option">
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={value === option.value}
+              disabled={readOnly}
+              onChange={() => onChange(option.value)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
 
 type OfflineApplyProps = {
   portal: PortalId;
@@ -105,6 +195,7 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
   const [registryNote, setRegistryNote] = useState('');
   const [mseaReachable, setMseaReachable] = useState<boolean | null>(product === 'majuu' ? null : false);
   const [mseaReason, setMseaReason] = useState('');
+  const [loansReachable, setLoansReachable] = useState<boolean | null>(null);
   const [bankBranches, setBankBranches] = useState<BankBranches>({});
   const [editingId, setEditingId] = useState('');
   const [readOnly, setReadOnly] = useState(false);
@@ -178,6 +269,19 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
       .catch(() => {
         if (!cancelled) setRegistryNote('Bank branches did not load. Choose the bank, then type the branch.');
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [product, step, steps]);
+
+  useEffect(() => {
+    if (product !== 'core') return;
+    const titleNow = steps[step];
+    if (titleNow !== 'Member confirmation' && titleNow !== 'Review') return;
+    let cancelled = false;
+    void probeOrigin(LINKS.loans.url, 5000).then((ok) => {
+      if (!cancelled) setLoansReachable(ok);
+    });
     return () => {
       cancelled = true;
     };
@@ -341,6 +445,20 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
       setError(errors[0]);
       setMessage('');
       return;
+    }
+    if (product === 'core') {
+      const loansUp = loansReachable ?? (await probeOrigin(LINKS.loans.url, 5000));
+      setLoansReachable(loansUp);
+      if (loansUp) {
+        const otpErrors = validateLoanStep('Member confirmation', ready, files, { otpHardGate: loansReachable === true });
+        if (otpErrors.length) {
+          setFieldErrors(otpErrors);
+          setError(otpErrors[0]);
+          setStep(LOAN_STEPS.indexOf('Member confirmation'));
+          setMessage('');
+          return;
+        }
+      }
     }
     setBusy(true);
     setError('');
@@ -522,6 +640,17 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
             ) : null}
             <div className="apply-section">
               <h3>Basics</h3>
+            {product === 'core' ? (
+              // OPS FOLLOW-UP: No Department of Social Services (DSS) / eCitizen group-registry
+              // API exists in this codebase. Majuu uses MSEA (msea.ecitizen.go.ke) — that is NOT DSS.
+              // Core loans keep typed registration number + certificate upload until a confirmed
+              // DSS machine-readable registry endpoint is available.
+              <p className="home-chat-note">
+                Department of Social Services (DSS) group certificates are entered manually: type the
+                registration number here and upload the certificate on the Documents step. There is no
+                live DSS registry lookup in this app (unlike MSEA for Wezesha Majuu).
+              </p>
+            ) : null}
             <label>
               Group name
               <input
@@ -531,10 +660,10 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
               />
             </label>
             <label>
-              Registration number
+              {product === 'core' ? 'DSS / group registration number' : 'Registration number'}
               <input
                 value={draft.registrationNumber}
-                placeholder={product === 'majuu' ? 'e.g. RA-NNSRDM' : ''}
+                placeholder={product === 'majuu' ? 'e.g. RA-NNSRDM' : 'As on the Social Services certificate'}
                 readOnly={readOnly || (product === 'majuu' && mseaReachable === true && draft.mseaStatus === 'found')}
                 onChange={(event) =>
                   setDraft({
@@ -770,87 +899,97 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                   <input
                     value={draft.meetingPoint}
                     readOnly={readOnly}
+                    placeholder="e.g. social hall, school"
                     onChange={(event) => setDraft({ ...draft, meetingPoint: event.target.value })}
                   />
                 </label>
-                <label>
-                  Nearest landmark
-                  <input
-                    value={draft.nearestLandmark}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, nearestLandmark: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Purpose of the group
-                  <textarea
-                    rows={3}
-                    value={draft.groupPurpose}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, groupPurpose: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Key activities of the group
-                  <textarea
-                    rows={3}
-                    value={draft.groupActivities}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, groupActivities: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Value chain
-                  <input
+                <LandmarkMapField
+                  value={draft.nearestLandmark}
+                  readOnly={readOnly}
+                  locationContext={{
+                    county: draft.county,
+                    constituency: draft.constituency,
+                    ward: draft.ward,
+                  }}
+                  onChange={(nearestLandmark) => setDraft({ ...draft, nearestLandmark })}
+                />
+                <CheckboxGroupField
+                  label="Purpose of the group"
+                  options={GROUP_PURPOSE_OPTIONS}
+                  value={draft.groupPurpose}
+                  readOnly={readOnly}
+                  onChange={(groupPurpose) => setDraft({ ...draft, groupPurpose })}
+                />
+                <CheckboxGroupField
+                  label="Key activities of the group"
+                  options={GROUP_ACTIVITY_OPTIONS}
+                  value={draft.groupActivities}
+                  readOnly={readOnly}
+                  onChange={(groupActivities) => setDraft({ ...draft, groupActivities })}
+                />
+                {activityShowsValueChain(draft.groupActivities) ? (
+                  <CheckboxGroupField
+                    label="Value chain"
+                    options={VALUE_CHAIN_OPTIONS}
                     value={draft.valueChain}
                     readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, valueChain: event.target.value })}
+                    onChange={(valueChain) => setDraft({ ...draft, valueChain })}
                   />
-                </label>
-                <label>
-                  Other activity
-                  <input
-                    value={draft.groupOther}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, groupOther: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Years of table banking
-                  <input
-                    inputMode="numeric"
-                    value={draft.tableBankingExperience}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, tableBankingExperience: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Monthly share contribution
-                  <input
-                    inputMode="numeric"
-                    value={draft.tableBankingShareContribution}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, tableBankingShareContribution: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Total amount loaned out
-                  <input
-                    inputMode="numeric"
-                    value={draft.tableBankingTotalLoanedOut}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, tableBankingTotalLoanedOut: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Total revolving fund
-                  <input
-                    inputMode="numeric"
-                    value={draft.tableBankingTotalRevolvingFund}
-                    readOnly={readOnly}
-                    onChange={(event) => setDraft({ ...draft, tableBankingTotalRevolvingFund: event.target.value })}
-                  />
-                </label>
+                ) : null}
+                {activityShowsOther(draft.groupActivities) ? (
+                  <label>
+                    Other activity
+                    <input
+                      value={draft.groupOther}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, groupOther: event.target.value })}
+                    />
+                  </label>
+                ) : null}
+                {activityShowsTableBanking(draft.groupActivities) ? (
+                  <>
+                    <label>
+                      Years of table banking
+                      <input
+                        inputMode="numeric"
+                        value={draft.tableBankingExperience}
+                        readOnly={readOnly}
+                        onChange={(event) => setDraft({ ...draft, tableBankingExperience: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Monthly share contribution
+                      <input
+                        inputMode="numeric"
+                        value={draft.tableBankingShareContribution}
+                        readOnly={readOnly}
+                        onChange={(event) =>
+                          setDraft({ ...draft, tableBankingShareContribution: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Total amount loaned out
+                      <input
+                        inputMode="numeric"
+                        value={draft.tableBankingTotalLoanedOut}
+                        readOnly={readOnly}
+                        onChange={(event) => setDraft({ ...draft, tableBankingTotalLoanedOut: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      Total revolving fund
+                      <input
+                        inputMode="numeric"
+                        value={draft.tableBankingTotalRevolvingFund}
+                        readOnly={readOnly}
+                        onChange={(event) =>
+                          setDraft({ ...draft, tableBankingTotalRevolvingFund: event.target.value })
+                        }
+                      />
+                    </label>
+                  </>
+                ) : null}
                 {!readOnly ? (
                   <label className="btn-ghost">
                     Group credit history (optional)
@@ -938,18 +1077,29 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
         {title === 'Group members' || title === 'Member Details' ? (
           <div className="account-form">
             {product === 'core' ? (
-              <label>
-                Nature of the group
-                <input
-                  value={draft.natureOfGroup}
-                  onChange={(event) => setDraft({ ...draft, natureOfGroup: event.target.value })}
-                />
-              </label>
+              <div className="apply-section">
+                <h3>Group membership</h3>
+                <label>
+                  Nature of the group
+                  <select
+                    value={draft.natureOfGroup}
+                    disabled={readOnly}
+                    onChange={(event) => setDraft({ ...draft, natureOfGroup: event.target.value })}
+                  >
+                    <option value="">Select</option>
+                    {NATURE_OF_GROUP_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             ) : (
               <p className="home-chat-note">Name at least 3 members. The MSEA chair, when listed, must be one of them.</p>
             )}
             {draft.members.map((member, index) => (
-              <fieldset className="offline-member" key={index}>
+              <fieldset className="offline-member apply-section" key={index}>
                 <legend>Member {index + 1}</legend>
                 <label>
                   Name
@@ -975,10 +1125,18 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                     </label>
                     <label>
                       Position
-                      <input
+                      <select
                         value={member.position}
+                        disabled={readOnly}
                         onChange={(event) => setMember(index, { position: event.target.value })}
-                      />
+                      >
+                        <option value="">Select</option>
+                        {MEMBER_POSITION_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </>
                 ) : null}
@@ -1070,58 +1228,91 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
 
         {title === 'Loan conditions' ? (
           <div className="account-form">
-            <label>
-              Loan type
-              <select value={draft.loanType} onChange={(event) => setDraft({ ...draft, loanType: event.target.value })}>
-                <option value="Wezesha">Wezesha (50,000 to 100,000)</option>
-                <option value="Endeleza">Endeleza (75,000 to 500,000)</option>
-              </select>
-            </label>
-            <label>
-              Group loan amount (KES)
-              <input
-                inputMode="numeric"
-                value={draft.loanAmount}
-                onChange={(event) => setDraft({ ...draft, loanAmount: event.target.value })}
+            <div className="apply-section">
+              <h3>Loan details</h3>
+              <RadioGroupField
+                name="loanType"
+                label="Loan type"
+                options={LOAN_TYPE_OPTIONS}
+                value={draft.loanType || 'Wezesha'}
+                readOnly={readOnly}
+                onChange={(loanType) => setDraft({ ...draft, loanType })}
               />
-            </label>
-            <label>
-              Repayment period (months, 1 to 24)
-              <input
-                inputMode="numeric"
-                value={draft.repaymentPeriod}
-                onChange={(event) => setDraft({ ...draft, repaymentPeriod: event.target.value })}
-              />
-            </label>
-            <label>
-              Institution
-              <select
-                value={draft.institutionType}
-                onChange={(event) => setDraft({ ...draft, institutionType: event.target.value })}
-              >
-                <option value="">Select</option>
-                <option value="bank">Bank</option>
-                <option value="sacco">SACCO</option>
-              </select>
-            </label>
-            <label>
-              Institution name
-              <input value={draft.bankName} onChange={(event) => setDraft({ ...draft, bankName: event.target.value })} />
-            </label>
-            <label>
-              Branch
-              <input
-                value={draft.bankBranch}
-                onChange={(event) => setDraft({ ...draft, bankBranch: event.target.value })}
-              />
-            </label>
-            <label>
-              Account number
-              <input
-                value={draft.bankAccount}
-                onChange={(event) => setDraft({ ...draft, bankAccount: event.target.value })}
-              />
-            </label>
+              <label>
+                Group loan amount (KES)
+                <input
+                  inputMode="numeric"
+                  value={draft.loanAmount}
+                  readOnly={readOnly}
+                  onChange={(event) => setDraft({ ...draft, loanAmount: event.target.value })}
+                />
+              </label>
+              <label>
+                Repayment period (months, 1 to 24)
+                <input
+                  type="range"
+                  min={1}
+                  max={24}
+                  value={Number(draft.repaymentPeriod) || 12}
+                  disabled={readOnly}
+                  onChange={(event) => setDraft({ ...draft, repaymentPeriod: event.target.value })}
+                />
+                <span className="home-chat-note">{Number(draft.repaymentPeriod) || 12} months</span>
+              </label>
+            </div>
+            <div className="apply-section">
+              <h3>Bank account details</h3>
+              <label>
+                Institution
+                <select
+                  value={draft.institutionType}
+                  disabled={readOnly}
+                  onChange={(event) => setDraft({ ...draft, institutionType: event.target.value })}
+                >
+                  <option value="">Select</option>
+                  <option value="bank">Bank</option>
+                  <option value="sacco">SACCO</option>
+                </select>
+              </label>
+              <label>
+                Institution name
+                <input
+                  value={draft.bankName}
+                  list="loan-bank-names"
+                  readOnly={readOnly}
+                  onChange={(event) => setDraft({ ...draft, bankName: event.target.value })}
+                />
+                <datalist id="loan-bank-names">
+                  {GROUP_BANKS.map((bank) => (
+                    <option key={bank} value={bank} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                Branch
+                <input
+                  value={draft.bankBranch}
+                  readOnly={readOnly}
+                  onChange={(event) => setDraft({ ...draft, bankBranch: event.target.value })}
+                />
+              </label>
+              <label>
+                Account name
+                <input
+                  value={draft.bankAccountName}
+                  readOnly={readOnly}
+                  onChange={(event) => setDraft({ ...draft, bankAccountName: event.target.value })}
+                />
+              </label>
+              <label>
+                Account number
+                <input
+                  value={draft.bankAccount}
+                  readOnly={readOnly}
+                  onChange={(event) => setDraft({ ...draft, bankAccount: event.target.value })}
+                />
+              </label>
+            </div>
           </div>
         ) : null}
 
@@ -1195,111 +1386,141 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
           <div className="account-form">
             {title === 'Proposed business' ? (
               <>
-                <label>
-                  Nature of business
-                  <input
+                <div className="apply-section">
+                  <h3>Business information</h3>
+                  <RadioGroupField
+                    name="natureOfBusiness"
+                    label="Nature of business"
+                    options={NATURE_OF_BUSINESS_OPTIONS}
                     value={draft.natureOfBusiness}
-                    onChange={(event) => setDraft({ ...draft, natureOfBusiness: event.target.value })}
+                    readOnly={readOnly}
+                    onChange={(natureOfBusiness) => setDraft({ ...draft, natureOfBusiness })}
                   />
-                </label>
-                <label>
-                  Business type
-                  <input
+                  <RadioGroupField
+                    name="businessType"
+                    label="Business sector"
+                    options={BUSINESS_TYPE_OPTIONS}
                     value={draft.businessType}
-                    onChange={(event) => setDraft({ ...draft, businessType: event.target.value })}
+                    readOnly={readOnly}
+                    onChange={(businessType) => setDraft({ ...draft, businessType })}
                   />
-                </label>
-                <label>
-                  Years in business
-                  <input
-                    inputMode="numeric"
-                    value={draft.yearsInBusiness}
-                    onChange={(event) => setDraft({ ...draft, yearsInBusiness: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Average income (KES)
-                  <input
-                    inputMode="numeric"
-                    value={draft.averageIncome}
-                    onChange={(event) => setDraft({ ...draft, averageIncome: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Cost of goods/service per month
-                  <input
-                    inputMode="numeric"
-                    value={draft.costOfGoods}
-                    onChange={(event) => setDraft({ ...draft, costOfGoods: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Rent for the business
-                  <input
-                    inputMode="numeric"
-                    value={draft.rentForBusiness}
-                    onChange={(event) => setDraft({ ...draft, rentForBusiness: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Salaries/wages
-                  <input
-                    inputMode="numeric"
-                    value={draft.salaries}
-                    onChange={(event) => setDraft({ ...draft, salaries: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Transport for business stock
-                  <input
-                    inputMode="numeric"
-                    value={draft.transportForBusinessStock}
-                    onChange={(event) => setDraft({ ...draft, transportForBusinessStock: event.target.value })}
-                  />
-                </label>
-                {draft.customExpenses.map((expense, index) => (
-                  <fieldset className="offline-member" key={index}>
-                    <legend>Extra expense {index + 1}</legend>
-                    <label>
-                      Expense name
-                      <input
-                        value={expense.name}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            customExpenses: draft.customExpenses.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, name: event.target.value } : item,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Amount
-                      <input
-                        inputMode="numeric"
-                        value={expense.amount}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            customExpenses: draft.customExpenses.map((item, itemIndex) =>
-                              itemIndex === index ? { ...item, amount: event.target.value } : item,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
-                  </fieldset>
-                ))}
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  onClick={() =>
-                    setDraft({ ...draft, customExpenses: [...draft.customExpenses, { name: '', amount: '' }] })
-                  }
-                >
-                  Add expense
-                </button>
+                  <label>
+                    Years in business
+                    <input
+                      inputMode="numeric"
+                      value={draft.yearsInBusiness}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, yearsInBusiness: event.target.value })}
+                    />
+                  </label>
+                </div>
+                <div className="apply-section">
+                  <h3>Business performance</h3>
+                  <label>
+                    Average income (KES)
+                    <input
+                      inputMode="numeric"
+                      value={draft.averageIncome}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, averageIncome: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Cost of goods/service per month
+                    <input
+                      inputMode="numeric"
+                      value={draft.costOfGoods}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, costOfGoods: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Rent for the business
+                    <input
+                      inputMode="numeric"
+                      value={draft.rentForBusiness}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, rentForBusiness: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Salaries/wages
+                    <input
+                      inputMode="numeric"
+                      value={draft.salaries}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, salaries: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Transport for business stock
+                    <input
+                      inputMode="numeric"
+                      value={draft.transportForBusinessStock}
+                      readOnly={readOnly}
+                      onChange={(event) => setDraft({ ...draft, transportForBusinessStock: event.target.value })}
+                    />
+                  </label>
+                  {draft.customExpenses.map((expense, index) => (
+                    <fieldset className="offline-member" key={index}>
+                      <legend>Extra expense {index + 1}</legend>
+                      <label>
+                        Expense name
+                        <input
+                          value={expense.name}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              customExpenses: draft.customExpenses.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, name: event.target.value } : item,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Amount
+                        <input
+                          inputMode="numeric"
+                          value={expense.amount}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              customExpenses: draft.customExpenses.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, amount: event.target.value } : item,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                    </fieldset>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() =>
+                      setDraft({ ...draft, customExpenses: [...draft.customExpenses, { name: '', amount: '' }] })
+                    }
+                  >
+                    Add expense
+                  </button>
+                  {(() => {
+                    const income = Number(draft.averageIncome) || 0;
+                    const expenses =
+                      (Number(draft.costOfGoods) || 0) +
+                      (Number(draft.rentForBusiness) || 0) +
+                      (Number(draft.salaries) || 0) +
+                      (Number(draft.transportForBusinessStock) || 0) +
+                      draft.customExpenses.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+                    const surplus = income - expenses;
+                    return (
+                      <p className="home-chat-note">
+                        Estimated {surplus >= 0 ? 'surplus' : 'deficit'}:{' '}
+                        <strong>KES {Math.abs(surplus).toLocaleString('en-KE')}</strong>
+                      </p>
+                    );
+                  })()}
+                </div>
               </>
             ) : (
               <>
@@ -1330,20 +1551,24 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
 
         {title === 'Member confirmation' ? (
           <div className="account-form">
+            <div className="apply-section">
+              <h3>Member confirmation</h3>
             <p className="home-chat-note">
-              Confirm the member list now. OTP/SMS codes can be sent here when the phone is online, or later when this
-              application syncs to loans/LMS. You can continue the remaining steps offline even if SMS is unavailable.
+              {loansReachable
+                ? `Loans/LMS is reachable. Confirm at least ${otpSummary?.required ?? Math.ceil((otpSummary?.total || 0) * 0.75)} of ${otpSummary?.total || 0} members (75%) before Next.`
+                : 'Confirm the member list now. OTP/SMS codes can be sent here when the phone is online, or later when this application syncs to loans/LMS. You can continue the remaining steps offline even if SMS is unavailable.'}
             </p>
             {otpSummary ? (
               <div className="otp-badges" aria-label="Member OTP status">
                 <span className="otp-badge otp-badge--ok">{otpSummary.verified} verified</span>
                 <span className="otp-badge otp-badge--sent">{otpSummary.sent} awaiting code</span>
                 <span className="otp-badge otp-badge--none">{otpSummary.none} not sent</span>
-                <span className="otp-badge">
-                  {otpSummary.verified}/{otpSummary.total || 0} responded
+                <span className={`otp-badge${otpSummary.thresholdMet ? ' otp-badge--ok' : ''}`}>
+                  {otpSummary.verified}/{otpSummary.total || 0} (need {otpSummary.required})
                 </span>
               </div>
             ) : null}
+            </div>
             <label className="account-check">
               <input
                 type="checkbox"
@@ -1405,7 +1630,11 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                   });
                 }}
               >
-                {busy ? 'Sending codes…' : 'Send consent codes (optional now)'}
+                {busy
+                  ? 'Sending codes…'
+                  : loansReachable
+                    ? 'Send consent codes'
+                    : 'Send consent codes (optional now)'}
               </button>
             ) : null}
           </div>
@@ -1468,7 +1697,8 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
               </label>
             ) : null}
             {product === 'core' ? (
-              <>
+              <div className="apply-section">
+                <h3>Declarations</h3>
                 <label className="account-check">
                   <input
                     type="checkbox"
@@ -1501,7 +1731,7 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                   />
                   We shall not be eligible for another loan until a default is cleared in full
                 </label>
-              </>
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -1616,9 +1846,11 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
 
         {title === 'Documents' || title === 'Upload Documents' ? (
           <div className="account-form">
+            <div className="apply-section">
+              <h3>{product === 'core' ? 'Group documents' : 'Upload documents'}</h3>
             <p className="home-chat-note">
               {product === 'core'
-                ? 'JPG, PNG, or PDF. Maximum 30 MB. Take a picture or choose a file, the same as the online loan form.'
+                ? 'JPG, PNG, or PDF. Maximum 30 MB. Include the DSS / Social Services registration certificate (manual upload — no DSS registry API). Take a picture or choose a file, the same as the online loan form.'
                 : 'JPG, PNG, or PDF. Maximum 10 MB. Take a picture or choose a file, the same as the online Majuu form.'}
             </p>
             {fileSlots(product).map((slot) => {
@@ -1735,6 +1967,7 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                 Confirm the member list
               </label>
             ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -1790,7 +2023,8 @@ export function OfflineApply({ portal, onBack, openPacketId }: OfflineApplyProps
                   return;
                 }
                 if (product === 'core') {
-                  const nextErrors = validateLoanStep(title, draft, files);
+                  const otpHardGate = title === 'Member confirmation' && loansReachable === true;
+                  const nextErrors = validateLoanStep(title, draft, files, { otpHardGate });
                   if (nextErrors.length) {
                     setFieldErrors(nextErrors);
                     setError(nextErrors[0]);

@@ -25,6 +25,7 @@ import { syncPending, type OfflinePacket } from './lib/offlineApply';
 import { replayPendingLogin } from './lib/pendingLogin';
 import { ensureNotifyPermission } from './lib/notify';
 import { openEboardFromDeepLink } from './lib/eboard';
+import { EboardShell } from './components/EboardShell';
 import { resolveDevicePushToken } from './lib/pushRegister';
 import { probePortals, type PortalAvailability, type PortalId } from './lib/portalStatus';
 import {
@@ -34,7 +35,7 @@ import {
 } from './lib/native';
 import './App.css';
 
-type Screen = 'home' | 'qr' | 'account' | 'notifications' | 'authenticator' | 'offline' | 'lms';
+type Screen = 'home' | 'qr' | 'account' | 'notifications' | 'authenticator' | 'offline' | 'lms' | 'eboard';
 type LmsOfficer = {
   email: string;
   constituency: string;
@@ -61,6 +62,11 @@ function App() {
   const [openLoanPacketId, setOpenLoanPacketId] = useState('');
   const [openMajuuRecordId, setOpenMajuuRecordId] = useState('');
   const [lmsOfficer, setLmsOfficer] = useState<LmsOfficer | null>(null);
+  const [eboardLaunch, setEboardLaunch] = useState<{
+    email?: string;
+    password?: string;
+    url?: string;
+  } | null>(null);
   const [staff, setStaff] = useState<StaffSession | null>(null);
   const [portals, setPortals] = useState<PortalAvailability>({ loans: null, majuu: null });
   const [session, setSession] = useState<AppSession | null>(null);
@@ -210,7 +216,10 @@ function App() {
           createdAt: new Date().toISOString(),
           read: false,
         });
+        return;
       }
+      setEboardLaunch({ url: result.url });
+      setScreen('eboard');
     }
 
     void CapApp.getLaunchUrl().then((launch) => {
@@ -292,6 +301,23 @@ function App() {
           });
           setStaff(loadStaffSession());
           setScreen('lms');
+        }}
+        onOpenEboard={(launch) => {
+          setEboardLaunch(launch);
+          setScreen('eboard');
+        }}
+      />
+    );
+  }
+  if (screen === 'eboard') {
+    return (
+      <EboardShell
+        email={eboardLaunch?.email}
+        password={eboardLaunch?.password}
+        initialUrl={eboardLaunch?.url}
+        onBack={() => {
+          setEboardLaunch(null);
+          setScreen(session || staff ? 'account' : 'home');
         }}
       />
     );

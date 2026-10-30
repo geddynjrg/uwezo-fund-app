@@ -784,11 +784,17 @@ export function packetStatusLabel(packet: OfflinePacket): string {
   return packet.lastError || 'Waiting to sync';
 }
 
+export type ValidateLoanStepOptions = {
+  /** When loans/LMS (or member OTP API) is reachable, enforce live ≥75% confirmed gate. */
+  otpHardGate?: boolean;
+};
+
 /** Soft per-step checks before Next (core loans). Full validateDraft still runs on save. */
 export function validateLoanStep(
   stepTitle: string,
   draft: ApplicationDraft,
   files: StoredFile[],
+  options: ValidateLoanStepOptions = {},
 ): string[] {
   const errors: string[] = [];
   const filled = draft.members.filter((member) => member.name.trim());
@@ -852,9 +858,21 @@ export function validateLoanStep(
         errors.push('Cost of goods, rent, salaries, and transport are required.');
       }
       break;
-    case 'Member confirmation':
-      // Soft: no hard OTP gate offline.
+    case 'Member confirmation': {
+      // Soft offline: badges only. Hard gate when loans/LMS OTP path is reachable.
+      if (options.otpHardGate) {
+        const summary = otpConsentSummary(draft);
+        const required = otpRequiredConfirmed(summary.total);
+        if (summary.total < 1) {
+          errors.push('Add members with phone numbers before confirming OTPs.');
+        } else if (summary.verified < required) {
+          errors.push(
+            `Confirm at least ${required} of ${summary.total} members (75%) before continuing while loans/LMS is online.`,
+          );
+        }
+      }
       break;
+    }
     case 'Confirmations':
       if (
         !draft.membersConfirmed ||
@@ -892,12 +910,25 @@ export function otpConsentSummary(draft: ApplicationDraft): {
   verified: number;
   sent: number;
   none: number;
+  required: number;
+  thresholdMet: boolean;
 } {
   const named = draft.members.filter((member) => member.name.trim() && member.phone.trim());
+  const total = named.length;
+  const verified = named.filter((member) => member.consentStatus === 'verified').length;
+  const required = otpRequiredConfirmed(total);
   return {
-    total: named.length,
-    verified: named.filter((member) => member.consentStatus === 'verified').length,
+    total,
+    verified,
     sent: named.filter((member) => member.consentStatus === 'sent').length,
     none: named.filter((member) => member.consentStatus === 'none').length,
+    required,
+    thresholdMet: total > 0 && verified >= required,
   };
+}
+
+/** Live rule: ceil(0.75 * total) members must confirm. */
+export function otpRequiredConfirmed(totalMembers: number): number {
+  if (totalMembers <= 0) return 0;
+  return Math.ceil(totalMembers * 0.75);
 }

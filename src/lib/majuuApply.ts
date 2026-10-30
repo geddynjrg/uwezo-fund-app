@@ -191,10 +191,12 @@ function majuuMatchesAccount(record: MajuuRecord, email: string, phone = ''): bo
   if (record.kind === 'individual') {
     const rowEmail = normalizeOwnerEmail(record.email || '');
     if (rowEmail && rowEmail === want) return true;
-    if (!owner && phone && record.phone && sameKenyanLine(phone, record.phone)) return true;
+    if (phone && record.phone && sameKenyanLine(phone, record.phone)) return true;
   }
-  if (record.kind === 'group' && !owner && phone && record.officialPhone && sameKenyanLine(phone, record.officialPhone)) {
-    return true;
+  if (record.kind === 'group') {
+    if (phone && record.officialPhone && sameKenyanLine(phone, record.officialPhone)) return true;
+    // Server rows stamped for this account on publish always carry ownerEmail; legacy unowned drafts stay visible only when no owner stamped.
+    if (!owner) return true;
   }
   return false;
 }

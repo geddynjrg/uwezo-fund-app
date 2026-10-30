@@ -1,4 +1,4 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { Capacitor, CapacitorCookies, CapacitorHttp } from '@capacitor/core';
 import { openExternal } from './openLink';
 
 // #region agent log
@@ -212,7 +212,7 @@ async function httpPostForm(
   body: string,
   timeoutMs: number,
   extraHeaders?: Record<string, string>,
-): Promise<{ status: number; text: string; url: string }> {
+): Promise<{ status: number; text: string; url: string; cookie: string }> {
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.post({
       url,
@@ -225,10 +225,16 @@ async function httpPostForm(
       connectTimeout: timeoutMs,
       readTimeout: timeoutMs,
     });
+    const headers: Record<string, string> = {};
+    const raw = response.headers || {};
+    for (const [key, value] of Object.entries(raw)) {
+      headers[key.toLowerCase()] = String(value);
+    }
     return {
       status: response.status || 0,
       text: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? ''),
       url: String((response as { url?: string }).url || url),
+      cookie: cookieHeaderFromSetCookie(headers),
     };
   }
   const response = await fetch(url, {
@@ -243,13 +249,82 @@ async function httpPostForm(
     redirect: 'follow',
     signal: AbortSignal.timeout(timeoutMs),
   });
-  return { status: response.status, text: await response.text(), url: response.url };
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key.toLowerCase()] = value;
+  });
+  return {
+    status: response.status,
+    text: await response.text(),
+    url: response.url,
+    cookie: cookieHeaderFromSetCookie(headers),
+  };
 }
 
-async function baseReachable(base: string, timeoutMs = 5000): Promise<boolean> {
+/** Push eBoard session cookies into the native WebView cookie jar for the in-app shell. */
+export async function installEboardCookies(base: string, cookieHeader: string) {
+  if (!Capacitor.isNativePlatform() || !base || !cookieHeader) return;
+  const url = stripTrailingSlash(base);
+  for (const part of cookieHeader.split(';')) {
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (!key) continue;
+    try {
+      await CapacitorCookies.setCookie({ url, key, value });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+const SESSION_KEY = 'uwezo.eboard.session.v1';
+
+export type EboardSession = {
+  base: string;
+  email: string;
+  cookie: string;
+  verifiedAt: string;
+};
+
+export function loadEboardSession(): EboardSession | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as EboardSession;
+    if (!parsed?.base || !parsed?.email) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function storeEboardSession(session: EboardSession) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearEboardSession() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function eboardHomeUrl(base?: string): string {
+  return `${stripTrailingSlash(base || loadCachedBase() || EBOARD_PUBLIC_BASE)}/`;
+}
+
+async function baseReachable(base: string, timeoutMs = 2500): Promise<boolean> {
   const root = stripTrailingSlash(base);
   // Django eBoard serves /login/ (trailing slash). Prefer that before API guesses.
-  for (const path of ['/login/', '/login', '/', '/api/health', '/api/login']) {
+  for (const path of ['/login/', '/']) {
     try {
       const result = await httpGet(`${root}${path === '/' ? '/' : path}`, timeoutMs);
       // #region agent log
@@ -284,7 +359,7 @@ export async function resolveEboardBase(): Promise<string> {
   const cached = loadCachedBase();
   if (cached) {
     try {
-      if (await baseReachable(cached, 3500)) {
+      if (await baseReachable(cached, 2000)) {
         setLastEboardProbeStatus({
           reachable: true,
           host: hostOf(cached),
@@ -311,7 +386,7 @@ export async function resolveEboardBase(): Promise<string> {
         host: hostOf(candidate),
       });
       // #endregion
-      if (await baseReachable(candidate, 8000)) {
+      if (await baseReachable(candidate, 3000)) {
         storeCachedBase(candidate);
         setLastEboardProbeStatus({
           reachable: true,
@@ -338,7 +413,7 @@ export async function resolveEboardBase(): Promise<string> {
         host: hostOf(candidate),
       });
       // #endregion
-      if (await baseReachable(candidate, 5000)) {
+      if (await baseReachable(candidate, 2500)) {
         storeCachedBase(candidate);
         setLastEboardProbeStatus({
           reachable: true,
@@ -443,7 +518,7 @@ async function probeEboardLoginOnBase(
       const posted = await httpPostJson(
         `${root}${path}`,
         { email: normalized, password: pass, username: normalized },
-        12000,
+        6000,
       );
       // #region agent log
       dbgEboard('B', 'eboard.ts:probeEboardLoginOnBase', 'json login attempt', {
@@ -472,7 +547,7 @@ async function probeEboardLoginOnBase(
   // Form login (Django eBoard: /login/ + csrfmiddlewaretoken + csrftoken cookie + username).
   for (const loginPath of ['/login/', '/login', '/accounts/login/', '/accounts/login']) {
     try {
-      const page = await httpGet(`${root}${loginPath}`, 10000);
+      const page = await httpGet(`${root}${loginPath}`, 5000);
       if (page.status === 404) continue;
       const token =
         /name=["']csrfmiddlewaretoken["']\s+value=["']([^"']+)["']/i.exec(page.text)?.[1] ||
@@ -490,12 +565,30 @@ async function probeEboardLoginOnBase(
       const cookie =
         page.cookie ||
         (token ? `csrftoken=${token}` : '');
-      const posted = await httpPostForm(`${root}${loginPath}`, fields, 15000, {
+      const posted = await httpPostForm(`${root}${loginPath}`, fields, 8000, {
         Referer: `${root}${loginPath}`,
         Origin: root.replace(/\/eboard$/i, '') || root,
         ...(cookie ? { Cookie: cookie } : {}),
         'X-CSRFToken': token || '',
       });
+      const mergedCookie = [cookie, posted.cookie].filter(Boolean).join('; ');
+      if (mergedCookie && loginLooksSuccessful(posted.status, posted.text)) {
+        await installEboardCookies(root, mergedCookie);
+        storeEboardSession({
+          base: root,
+          email: normalized,
+          cookie: mergedCookie,
+          verifiedAt: new Date().toISOString(),
+        });
+      } else if (mergedCookie && posted.status >= 200 && posted.status < 400 && !/\/login\/?/i.test(posted.url)) {
+        await installEboardCookies(root, mergedCookie);
+        storeEboardSession({
+          base: root,
+          email: normalized,
+          cookie: mergedCookie,
+          verifiedAt: new Date().toISOString(),
+        });
+      }
       // #region agent log
       dbgEboard('H-CSRF', 'eboard.ts:probeEboardLoginOnBase', 'form login attempt', {
         host,
@@ -699,8 +792,8 @@ export function eboardHttpsUrl(link: EboardDeepLink): string {
   return `${base}/meetings/${encodeURIComponent(link.meetingId)}/`;
 }
 
-/** Open eBoard from a uwezo:// deep link or fall back to home. Never opens recording URLs. */
-export async function openEboardFromDeepLink(raw: string): Promise<{ ok: boolean; message: string }> {
+/** Resolve an in-app eBoard URL (with cookies when a session exists). Never opens recording URLs. */
+export async function openEboardFromDeepLink(raw: string): Promise<{ ok: boolean; message: string; url?: string }> {
   if (isForbiddenEboardUrl(raw)) {
     return { ok: false, message: 'Recording links are not opened in the Uwezo app.' };
   }
@@ -717,11 +810,76 @@ export async function openEboardFromDeepLink(raw: string): Promise<{ ok: boolean
   if (isForbiddenEboardUrl(target)) {
     return { ok: false, message: 'Recording links are not opened in the Uwezo app.' };
   }
-  await openExternal(target);
-  return { ok: true, message: 'Opening eBoard…' };
+  const session = loadEboardSession();
+  if (session?.cookie) await installEboardCookies(session.base, session.cookie);
+  return { ok: true, message: 'Opening eBoard…', url: target };
 }
 
-export async function openEboardHome(): Promise<void> {
+/** Resolve eBoard home URL for the in-app WebView shell (installs cookies when available). */
+export async function openEboardHome(): Promise<string> {
+  const base = stripTrailingSlash(await resolveEboardBase());
+  const session = loadEboardSession();
+  if (session?.cookie) {
+    await installEboardCookies(session.base || base, session.cookie);
+    return eboardHomeUrl(session.base || base);
+  }
+  return eboardHomeUrl(base);
+}
+
+/**
+ * Authenticate (if credentials given) and return a signed-in home URL for the in-app shell.
+ * Target budget ≤15s when the host is reachable and the base is cached.
+ */
+export async function prepareEboardInApp(
+  email?: string,
+  password?: string,
+): Promise<{ ok: boolean; url: string; message: string }> {
+  const normalized = String(email || '')
+    .trim()
+    .toLowerCase();
+  const pass = String(password || '');
+  const existing = loadEboardSession();
+  if (existing?.cookie && (!normalized || existing.email === normalized)) {
+    await installEboardCookies(existing.base, existing.cookie);
+    return { ok: true, url: eboardHomeUrl(existing.base), message: '' };
+  }
+  if (normalized && pass) {
+    const accepted = await probeEboardLogin(normalized, pass);
+    if (!accepted) {
+      const status = getLastEboardProbeStatus();
+      return {
+        ok: false,
+        url: '',
+        message:
+          status.detail ||
+          (status.reachable
+            ? 'eBoard rejected this email and password.'
+            : 'Could not reach eBoard from this phone.'),
+      };
+    }
+    const session = loadEboardSession();
+    const base = session?.base || (await resolveEboardBase().catch(() => EBOARD_PUBLIC_BASE));
+    if (session?.cookie) await installEboardCookies(base, session.cookie);
+    return { ok: true, url: eboardHomeUrl(base), message: '' };
+  }
+  try {
+    const base = await resolveEboardBase();
+    const status = getLastEboardProbeStatus();
+    if (!status.reachable) {
+      return {
+        ok: false,
+        url: '',
+        message: status.detail || 'Could not reach eBoard from this phone.',
+      };
+    }
+    return { ok: true, url: eboardHomeUrl(base), message: '' };
+  } catch {
+    return { ok: false, url: '', message: 'Could not reach eBoard from this phone.' };
+  }
+}
+
+/** Last-resort external browser open (not the primary product path). */
+export async function openEboardExternalFallback(): Promise<void> {
   const base = stripTrailingSlash(await resolveEboardBase());
   await openExternal(`${base}/`);
 }

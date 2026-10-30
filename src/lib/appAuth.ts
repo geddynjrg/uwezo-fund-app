@@ -154,9 +154,12 @@ export async function appLoginProbe(input: {
   email: string;
   password: string;
   phone?: string;
+  /** When false, skip eBoard (faster LMS/Mail path). Default true. */
+  includeEboard?: boolean;
 }): Promise<ApplicantPortalProbe> {
   const email = normalizeEmail(input.email);
   const phone = (input.phone || '').trim();
+  const includeEboard = input.includeEboard !== false;
   const empty: ApplicantPortalProbe = {
     majuu: false,
     loans: false,
@@ -192,7 +195,7 @@ export async function appLoginProbe(input: {
   const [majuu, loans, eboardOk] = await Promise.all([
     tryPortal('https://majuu.uwezo.go.ke'),
     tryPortal('https://loans.uwezo.go.ke'),
-    probeEboardLogin(email, input.password).catch(() => false),
+    includeEboard ? probeEboardLogin(email, input.password).catch(() => false) : Promise.resolve(false),
   ]);
 
   return {

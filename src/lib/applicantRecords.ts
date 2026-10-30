@@ -50,44 +50,63 @@ function ownerStamp(session?: AppSession | null): { ownerEmail: string; ownerPho
   };
 }
 
-async function readJson(url: string, headers: Record<string, string>): Promise<{ tables: ApplicantTable[]; loansTables: ApplicantTable[] }> {
-  const empty = { tables: [], loansTables: [] };
+type PullResult = {
+  tables: ApplicantTable[];
+  loansTables: ApplicantTable[];
+  ok: boolean;
+};
+
+async function readJson(url: string, headers: Record<string, string>): Promise<PullResult> {
+  const empty: PullResult = { tables: [], loansTables: [], ok: false };
   try {
-    const response = await fetch(url, { headers, signal: AbortSignal.timeout(25000) });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
     if (!response.ok) return empty;
     const data = (await response.json()) as { ok?: boolean; tables?: ApplicantTable[]; loansTables?: ApplicantTable[] };
     if (!data.ok) return empty;
     return {
       tables: Array.isArray(data.tables) ? data.tables : [],
       loansTables: Array.isArray(data.loansTables) ? data.loansTables : [],
+      ok: true,
     };
   } catch {
     return empty;
   }
 }
 
-export async function pullApplicantRecords(session: AppSession): Promise<ApplicantRecords> {
+export async function pullApplicantRecords(session: AppSession): Promise<ApplicantRecords & { pullOk: boolean }> {
   const majuuToken = session.majuuAccessToken || (session.origin.includes('majuu') ? session.accessToken : '');
   const loansToken = session.loansAccessToken || (session.origin.includes('loans') ? session.accessToken : '');
   let majuu: ApplicantTable[] = [];
   let loans: ApplicantTable[] = [];
+  let pullOk = false;
+
+  const tasks: Promise<void>[] = [];
   if (majuuToken) {
-    const loaded = await readJson('https://majuu.uwezo.go.ke/api/auth/app/records', {
-      Accept: 'application/json',
-      Authorization: `Bearer ${majuuToken}`,
-      ...(loansToken ? { 'X-Loans-Authorization': `Bearer ${loansToken}` } : {}),
-    });
-    majuu = loaded.tables;
-    loans = loaded.loansTables;
+    tasks.push(
+      readJson('https://majuu.uwezo.go.ke/api/auth/app/records', {
+        Accept: 'application/json',
+        Authorization: `Bearer ${majuuToken}`,
+        ...(loansToken ? { 'X-Loans-Authorization': `Bearer ${loansToken}` } : {}),
+      }).then((loaded) => {
+        if (loaded.ok) pullOk = true;
+        majuu = loaded.tables;
+        if (loaded.loansTables.length) loans = loaded.loansTables;
+      }),
+    );
   }
-  if (!loans.length && loansToken) {
-    const loaded = await readJson('https://loans.uwezo.go.ke/api/auth/app/records', {
-      Accept: 'application/json',
-      Authorization: `Bearer ${loansToken}`,
-    });
-    loans = loaded.tables;
+  if (loansToken) {
+    tasks.push(
+      readJson('https://loans.uwezo.go.ke/api/auth/app/records', {
+        Accept: 'application/json',
+        Authorization: `Bearer ${loansToken}`,
+      }).then((loaded) => {
+        if (loaded.ok) pullOk = true;
+        if (loaded.tables.length) loans = loaded.tables;
+      }),
+    );
   }
-  return { savedAt: new Date().toISOString(), majuu, loans };
+  await Promise.all(tasks);
+  return { savedAt: new Date().toISOString(), majuu, loans, pullOk };
 }
 
 export async function clearPublishedRecords(): Promise<void> {
@@ -99,11 +118,26 @@ export async function clearPublishedRecords(): Promise<void> {
   }
 }
 
+function recordsHaveRows(records: ApplicantRecords): boolean {
+  const majuuRows = (records.majuu || []).reduce((n, t) => n + (t.rows?.length || 0), 0);
+  const loanRows = (records.loans || []).reduce((n, t) => n + (t.rows?.length || 0), 0);
+  return majuuRows + loanRows > 0;
+}
+
 export async function publishApplicantRecords(
   records: ApplicantRecords,
   session?: AppSession | null,
+  options?: { forceClear?: boolean; pullOk?: boolean },
 ): Promise<string[]> {
-  await clearPublishedRecords();
+  const hasRows = recordsHaveRows(records);
+  const pullOk = options?.pullOk !== false;
+  // Never wipe prior server mirrors when the pull failed or returned empty.
+  if (options?.forceClear || (pullOk && hasRows)) {
+    await clearPublishedRecords();
+  } else if (!hasRows) {
+    return [];
+  }
+
   const owner = ownerStamp(session);
   const numbers: string[] = [];
   const groups = table(records.majuu, 'group_applications');
@@ -145,7 +179,7 @@ export async function publishApplicantRecords(
       name: cell(member, 'name'),
       nationalId: cell(member, 'idNo'),
       phone: cell(member, 'mobile'),
-      email: cell(member, 'email'),
+      email: cell(member, 'email') || owner.ownerEmail,
       passportNo: cell(member, 'passportNo'),
       gender: genderOf(cell(member, 'gender')),
       registrationNumber: cell(data, 'registrationNumber'),
@@ -240,6 +274,8 @@ export async function publishApplicantRecords(
 
 export function recordsNote(numbers: string[]): string {
   const unique = [...new Set(numbers.filter(Boolean))];
-  if (!unique.length) return 'Your sign-in is encrypted on this phone. Majuu and Loans records refresh the next time you sign in online.';
+  if (!unique.length) {
+    return 'Your sign-in is encrypted on this phone. Majuu and Loans records refresh the next time you sign in online.';
+  }
   return `Encrypted on this phone: ${unique.slice(0, 8).join(', ')}. You can sign in again without internet.`;
 }

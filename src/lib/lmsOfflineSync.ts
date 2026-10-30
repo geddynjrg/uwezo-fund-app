@@ -1113,3 +1113,133 @@ export async function decideNationalPhase(input: {
     detail: String(json.detail || (json.ok ? 'Decision saved.' : 'Decision failed.')),
   };
 }
+
+export type ApplicationScoreResult = SyncResult & {
+  score?: Record<string, unknown>;
+  risk_level?: string;
+  assessment_data?: unknown;
+};
+
+/**
+ * Score a constituency application via LMS (repay-ml /v1/score/intake on the server)
+ * and persist risk_level + assessment_data on the temp application — same path as live review.
+ */
+export async function scoreApplicationOnline(input: {
+  email: string;
+  id: number;
+  application_id?: string;
+}): Promise<ApplicationScoreResult> {
+  setLmsActiveEmail(input.email);
+  const cache = loadLmsCache(input.email);
+  const host = cache?.host || 'https://lms.uwezo.go.ke';
+  const cookie = cache?.cookie || '';
+  if (!cookie) {
+    return { ok: false, detail: 'Sign in online to score this application.' };
+  }
+  const meta = await loadLmsMeta(input.email);
+  const { status, json } = await httpJson('POST', `${host}/app/mobile/score`, cookie, {
+    id: input.id,
+    application_id: input.application_id || undefined,
+    constituency: meta?.constituencyCode || meta?.constituencyName || '',
+  });
+  if (status === 401 || status === 403) {
+    return { ok: false, detail: String(json.detail || 'LMS session expired before scoring.') };
+  }
+  if (status === 404) {
+    // Older LMS builds without /app/mobile/score — queue mutation for pushLmsMutations.
+    await queueMutation({
+      id: newClientKey(),
+      type: 'application.score',
+      payload: {
+        id: input.id,
+        ...(input.application_id ? { application_id: input.application_id } : {}),
+      },
+    });
+    return {
+      ok: false,
+      detail: 'Score route missing on LMS; queued application.score for sync.',
+      meta: await loadLmsMeta(input.email),
+    };
+  }
+  if (!json.ok) {
+    return {
+      ok: false,
+      detail: String(json.detail || 'Could not score application on LMS.'),
+      meta: await loadLmsMeta(input.email),
+    };
+  }
+
+  const riskLevel = json.risk_level != null ? String(json.risk_level) : undefined;
+  const assessmentData = json.assessment_data;
+  const score =
+    json.score && typeof json.score === 'object' ? (json.score as Record<string, unknown>) : undefined;
+
+  const rows = await listLmsTable('phase_applications', 10000, input.email);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (existing) {
+    await putLocalRow(
+      'phase_applications',
+      {
+        ...existing,
+        ...(riskLevel != null ? { risk_level: riskLevel } : {}),
+        ...(assessmentData !== undefined ? { assessment_data: assessmentData } : {}),
+        updated_at: new Date().toISOString(),
+      },
+      input.email,
+    );
+  }
+
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: String(json.detail || 'Risk / ML score saved on LMS.'),
+    score,
+    risk_level: riskLevel,
+    assessment_data: assessmentData,
+    meta: await loadLmsMeta(input.email),
+  };
+}
+
+/** Persist a score payload locally and queue LMS write-back when the dedicated route is unavailable. */
+export async function persistApplicationScoreLocal(input: {
+  email: string;
+  id: number;
+  risk_level?: string;
+  assessment_data?: unknown;
+  queueWriteback?: boolean;
+}): Promise<ApplicationScoreResult> {
+  setLmsActiveEmail(input.email);
+  const rows = await listLmsTable('phase_applications', 10000, input.email);
+  const existing = rows.find((row) => Number(row.id) === input.id);
+  if (!existing) {
+    return { ok: false, detail: 'Application is not in the offline database. Sync first.' };
+  }
+  await putLocalRow(
+    'phase_applications',
+    {
+      ...existing,
+      ...(input.risk_level != null ? { risk_level: input.risk_level } : {}),
+      ...(input.assessment_data !== undefined ? { assessment_data: input.assessment_data } : {}),
+      pending_sync: Boolean(input.queueWriteback),
+      updated_at: new Date().toISOString(),
+    },
+    input.email,
+  );
+  if (input.queueWriteback) {
+    await queueMutation({
+      id: newClientKey(),
+      type: 'application.score',
+      payload: { id: input.id },
+    });
+  }
+  await sealIfPossible(input.email);
+  return {
+    ok: true,
+    detail: input.queueWriteback
+      ? 'Score saved on this phone. Sync will write risk / ML fields to the LMS.'
+      : 'Score saved on this phone.',
+    risk_level: input.risk_level,
+    assessment_data: input.assessment_data,
+    meta: await loadLmsMeta(input.email),
+  };
+}

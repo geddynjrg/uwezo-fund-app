@@ -42,6 +42,7 @@ export type LmsMutationType =
   | 'application.remove_phase'
   | 'application.return'
   | 'application.review'
+  | 'application.score'
   | 'phase.create'
   | 'phase.update'
   | 'phase.submit';

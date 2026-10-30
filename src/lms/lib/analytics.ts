@@ -9,9 +9,149 @@ export type MoneyStat = {
   hasProgress?: boolean;
 };
 
+export type RiskMlDisplay = {
+  riskLevel: string;
+  riskBand: string;
+  mlScore: string;
+  mlBand: string;
+  source: 'synced' | 'scored' | 'none';
+  disclaimer: string;
+};
+
 function num(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Drop empty / literal "null" / bare "#123" style placeholders. */
+export function cleanLabel(value: unknown): string {
+  if (value == null) return '';
+  const text = String(value).trim();
+  if (!text || /^null$/i.test(text) || /^undefined$/i.test(text) || /^—$/.test(text)) return '';
+  if (/^#?\d+$/.test(text)) return '';
+  if (/^group\s*#/i.test(text)) return '';
+  return text;
+}
+
+/**
+ * Prefer master group name, then synced temp-application name fields.
+ * Avoid literal null / "Group #id" when a real name exists on the app row.
+ */
+export function resolveGroupLabel(
+  app: Record<string, unknown>,
+  group?: Record<string, unknown> | null,
+): string {
+  const fromGroup = cleanLabel(group?.name);
+  if (fromGroup) return fromGroup;
+  const candidates = [
+    app.group_name,
+    app.business_name,
+    app.nature_of_business,
+    app.proposed_business_name,
+    app.group_code,
+    group?.code,
+    app.reg_number,
+    group?.reg_number,
+  ];
+  for (const candidate of candidates) {
+    const label = cleanLabel(candidate);
+    if (label) return label;
+  }
+  return 'Unnamed group';
+}
+
+/** Officer profile / LMS meta name beats a raw numeric constituency id. */
+export function resolveConstituencyLabel(
+  constituencyProp: string | undefined | null,
+  metaName?: string | null,
+  wards?: Record<string, unknown>[],
+): string {
+  const fromMeta = cleanLabel(metaName);
+  if (fromMeta) return fromMeta;
+  const fromProp = cleanLabel(constituencyProp);
+  if (fromProp) return fromProp;
+  if (wards?.length) {
+    for (const ward of wards) {
+      const name = cleanLabel(ward.constituency_name || ward.constituencyName);
+      if (name) return name;
+    }
+  }
+  return 'Constituency';
+}
+
+function parseAssessment(raw: unknown): Record<string, unknown> | null {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Pull risk band + ML/TU-like score from synced temp-application fields or a live score payload. */
+export function extractRiskMlDisplay(
+  app: Record<string, unknown>,
+  scoredPayload?: Record<string, unknown> | null,
+): RiskMlDisplay {
+  const empty: RiskMlDisplay = {
+    riskLevel: '—',
+    riskBand: '—',
+    mlScore: '—',
+    mlBand: '—',
+    source: 'none',
+    disclaimer: 'Advisory score — not a CRB report',
+  };
+  const assessment = parseAssessment(app.assessment_data) || {};
+  const intakeFromSync =
+    (assessment.ml_intake as Record<string, unknown> | undefined) ||
+    (assessment.intake as Record<string, unknown> | undefined) ||
+    null;
+  const intakeFromScore =
+    scoredPayload && typeof scoredPayload.intake === 'object' && scoredPayload.intake
+      ? (scoredPayload.intake as Record<string, unknown>)
+      : null;
+  const intake = intakeFromScore || intakeFromSync;
+  const riskLevel =
+    cleanLabel(app.risk_level) ||
+    cleanLabel(assessment.overall_category) ||
+    cleanLabel(intake?.risk_band) ||
+    '';
+  const riskBand =
+    cleanLabel(intake?.risk_band) ||
+    (riskLevel ? riskLevel.replace(/\s*risk$/i, '').trim() : '') ||
+    '';
+  const mlScoreRaw = intake?.tu_like_score ?? intake?.ml_score ?? assessment.tu_like_score;
+  const mlScore =
+    mlScoreRaw != null && mlScoreRaw !== '' && Number.isFinite(Number(mlScoreRaw))
+      ? String(Math.round(Number(mlScoreRaw)))
+      : '';
+  const mlBand = cleanLabel(intake?.tu_like_band) || cleanLabel(intake?.risk_band) || '';
+  if (!riskLevel && !mlScore) return empty;
+  return {
+    riskLevel: riskLevel || (riskBand ? `${riskBand} Risk` : '—'),
+    riskBand: riskBand || '—',
+    mlScore: mlScore || '—',
+    mlBand: mlBand || '—',
+    source: intakeFromScore
+      ? 'scored'
+      : intakeFromSync || cleanLabel(app.risk_level)
+        ? 'synced'
+        : 'none',
+    disclaimer: cleanLabel(assessment.ml_disclaimer) || cleanLabel(intake?.disclaimer) || empty.disclaimer,
+  };
+}
+
+/** Final constituency decisions — hide approve/reject/return/review actions. */
+export function isDecisionLocked(status: unknown): boolean {
+  const s = String(status || '').toLowerCase();
+  return /approv|disburs|issued|pending_submission_to_hq|pending_hq|submitted_to_hq|hq_approved/.test(s);
 }
 
 export async function loadConstituencyBundle(email: string) {
