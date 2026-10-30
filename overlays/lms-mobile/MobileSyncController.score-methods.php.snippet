@@ -1,0 +1,105 @@
+    public function score(Request $request)
+    {
+        $user = $request->user();
+        $constituency = $this->resolveConstituency($user, (string) $request->input('constituency', ''));
+        if (!$constituency) {
+            return response()->json(['ok' => false, 'detail' => 'No constituency for scoring.'], 403);
+        }
+        $result = $this->scoreApplication($constituency, [
+            'id' => $request->input('id'),
+            'application_id' => $request->input('application_id'),
+        ]);
+        $status = ($result['ok'] ?? false) ? 200 : 422;
+        return response()->json($result, $status);
+    }
+
+    private function scoreApplication(Constituency $constituency, array $payload): array
+    {
+        $validator = Validator::make($payload, [
+            'id' => 'nullable|integer|exists:phase_applications,id',
+            'application_id' => 'nullable|string|max:64',
+        ]);
+        if ($validator->fails()) {
+            return ['ok' => false, 'detail' => $validator->errors()->first()];
+        }
+
+        $app = null;
+        if (!empty($payload['id'])) {
+            $app = PhaseApplication::query()->find((int) $payload['id']);
+            if ($app && !$this->phaseAppInConstituency($app, $constituency)) {
+                return ['ok' => false, 'detail' => 'That application is not in your constituency.'];
+            }
+        }
+
+        $temp = null;
+        if ($app && $app->temp_application_id) {
+            $temp = TempApplication::query()->find($app->temp_application_id);
+        }
+        $applicationId = trim((string) ($payload['application_id'] ?? ''));
+        if ($applicationId === '' && $temp) {
+            $applicationId = (string) ($temp->application_id ?? '');
+        }
+        if ($applicationId === '' && !$temp) {
+            $temp = TempApplication::query()->where('application_id', (string) ($payload['application_id'] ?? ''))->first();
+            if ($temp) {
+                $applicationId = (string) $temp->application_id;
+            }
+        }
+        if ($applicationId === '') {
+            return ['ok' => false, 'detail' => 'Application number is required to score.'];
+        }
+        if (!$temp) {
+            $temp = TempApplication::query()->where('application_id', $applicationId)->first();
+        }
+        if (!$temp) {
+            return ['ok' => false, 'detail' => 'Temp application not found for scoring.'];
+        }
+
+        /** @var RepaymentScoreClient $client */
+        $client = app(RepaymentScoreClient::class);
+        $score = $client->scoreIntake($applicationId);
+        if (!$score) {
+            return ['ok' => false, 'detail' => 'Scoring service unavailable. Try again when online.'];
+        }
+
+        $merged = $client->mergeIntoAssessmentData(
+            is_array($temp->assessment_data) ? $temp->assessment_data : null,
+            $score
+        );
+        $intake = is_array($score['intake'] ?? null) ? $score['intake'] : [];
+        $band = (string) ($intake['risk_band'] ?? '');
+        $riskLevel = $temp->risk_level;
+        if (!$riskLevel && $band !== '') {
+            $riskLevel = trim($band) . (stripos($band, 'risk') === false ? ' Risk' : '');
+        }
+
+        $temp->assessment_data = $merged;
+        if ($riskLevel) {
+            $temp->risk_level = $riskLevel;
+        }
+        $temp->save();
+
+        if ($app) {
+            // Keep phone snapshot fields aligned after next sync / local merge.
+            $app->setAttribute('risk_level', $temp->risk_level);
+            $app->setAttribute('assessment_data', $temp->assessment_data);
+        }
+
+        return [
+            'ok' => true,
+            'detail' => 'Risk / ML score saved on LMS.',
+            'application_id' => $applicationId,
+            'phase_application_id' => $app?->id,
+            'risk_level' => $temp->risk_level,
+            'assessment_data' => $temp->assessment_data,
+            'score' => $score,
+        ];
+    }
+    private function resolveConstituency(User $user, string $requestedName): ?Constituency
+    {
+        $current = $user->currentConstituency()->first()
+            ?: $user->constituencies()->first();
+        if (!$current) {
+            return null;
+        }
+        if ($requestedName !== '') {

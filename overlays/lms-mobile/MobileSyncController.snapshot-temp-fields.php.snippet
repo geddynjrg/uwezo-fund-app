@@ -1,0 +1,54 @@
+
+        // Human-facing application numbers live on temp_applications.application_id.
+        if ($applications->isNotEmpty()) {
+            $tempIds = $applications->pluck('temp_application_id')->filter()->unique()->values();
+            $tempNumbers = $tempIds->isEmpty()
+                ? collect()
+                : TempApplication::query()
+                    ->whereIn('id', $tempIds)
+                    ->get([
+                        'id', 'application_id', 'group_name', 'nature_of_business',
+                        'ward_name', 'constituency_name', 'risk_level', 'assessment_data',
+                        'group_code', 'gfs_code', 'loan_amount',
+                    ])
+                    ->keyBy('id');
+            $applications = $applications->map(function (PhaseApplication $app) use ($tempNumbers) {
+                $row = $app->toArray();
+                $temp = $app->temp_application_id ? $tempNumbers->get($app->temp_application_id) : null;
+                $number = $temp ? (string) ($temp->application_id ?? '') : '';
+                $row['application_number'] = $number;
+                $row['application_id'] = $number !== '' ? $number : null;
+                if ($temp) {
+                    $row['group_name'] = $temp->group_name;
+                    $row['business_name'] = $temp->nature_of_business;
+                    $row['nature_of_business'] = $temp->nature_of_business;
+                    $row['ward_name'] = $temp->ward_name;
+                    $row['constituency_name'] = $temp->constituency_name;
+                    $row['risk_level'] = $temp->risk_level;
+                    $row['assessment_data'] = $temp->assessment_data;
+                    if (empty($row['group_code'])) {
+                        $row['group_code'] = $temp->group_code;
+                    }
+                    if (empty($row['gfs_code'])) {
+                        $row['gfs_code'] = $temp->gfs_code;
+                    }
+                    if (empty($row['amount_applied']) && $temp->loan_amount) {
+                        $row['amount_applied'] = $temp->loan_amount;
+                    }
+                }
+                return $row;
+            })->values();
+        }
+
+        $groupMembers = $loanIds->isEmpty()
+            ? collect()
+            : GroupMember::query()
+                ->whereIn('group_loans_id', $loanIds)
+                ->with(['groupLoan:id,group_id'])
+                ->get(['id', 'member_Id', 'group_loans_id', 'role', 'created_at', 'updated_at'])
+                ->map(function (GroupMember $gm) {
+                    return [
+                        'id' => $gm->id,
+                        'member_Id' => $gm->member_Id,
+                        'group_loans_id' => $gm->group_loans_id,
+                        'group_id' => $gm->groupLoan->group_id ?? null,
